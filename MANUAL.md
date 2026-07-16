@@ -1,7 +1,7 @@
 # FB Publisher - Manual de Usuario
 
 Herramienta para publicar anuncios en grupos de Facebook usando funciones deterministas.
-Usa Playwright con `mbasic.facebook.com` (la versión HTML estática de Facebook) para máxima estabilidad de selectores.
+Usa Playwright con `m.facebook.com` (la versión móvil ligera de Facebook) para máxima estabilidad de selectores.
 
 ---
 
@@ -15,7 +15,7 @@ Usa Playwright con `mbasic.facebook.com` (la versión HTML estática de Facebook
 6. [Plantillas de anuncios](#6-plantillas-de-anuncios)
 7. [Sistema de rotación determinista](#7-sistema-de-rotación-determinista)
 8. [Programación automática (Scheduler)](#8-programación-automática-scheduler)
-9. [Cómo funciona la publicación (mbasic.facebook.com)](#9-cómo-funciona-la-publicación)
+9. [Cómo funciona la publicación (m.facebook.com)](#9-cómo-funciona-la-publicación)
 10. [Historial de publicaciones](#10-historial-de-publicaciones)
 11. [Referencia de configuración](#11-referencia-de-configuración)
 
@@ -92,7 +92,7 @@ npm run cli -- login
 ```
 
 Esto:
-1. Abre un navegador visible en `mbasic.facebook.com`
+1. Abre un navegador visible en `m.facebook.com`
 2. Tú inicias sesión manualmente con tu cuenta de Facebook
 3. La sesión se guarda automáticamente en `data/browser-session/`
 4. Cierras el navegador cuando termines
@@ -252,6 +252,7 @@ El ID del grupo se extrae automáticamente de la URL. Si la URL contiene el nomb
 - **Activar/Desactivar**: Pausa las publicaciones sin eliminar el grupo.
 - **Editar**: Modificar cualquier parámetro.
 - **Eliminar**: Elimina el grupo permanentemente.
+- **Verificar membresía**: abre una sesión real de Playwright contra `m.facebook.com/groups/{id}` y detecta si la cuenta es miembro (`Miembro`), no lo es (`No miembro`), tiene una solicitud pendiente de aprobación (`Solicitud pendiente`), o hubo un error de red/carga (`Error al verificar`). El resultado y la fecha de verificación quedan guardados en el grupo. **Importante:** este chequeo detecta si el bot puede *ver* el grupo como miembro, pero no es instantáneo — usa el mismo navegador real, así que tarda unos segundos por grupo. Úsalo antes de activar una regla de programación para un grupo nuevo.
 
 ---
 
@@ -422,7 +423,7 @@ El scheduler se ejecuta en primer plano y muestra logs de cada publicación. Pre
 2. **Verifica** que el grupo no esté en cooldown.
 3. **Verifica** que no se haya excedido el límite diario del grupo.
 4. **Renderiza** la plantilla con los valores deterministas.
-5. **Publica** via `mbasic.facebook.com` usando Playwright.
+5. **Publica** via `m.facebook.com` usando Playwright.
 6. **Registra** el resultado en el historial.
 7. **Avanza** el índice de rotación.
 
@@ -430,44 +431,41 @@ El scheduler se ejecuta en primer plano y muestra logs de cada publicación. Pre
 
 ## 9. Cómo funciona la publicación
 
-### mbasic.facebook.com
+### m.facebook.com
 
-La herramienta usa `mbasic.facebook.com` en lugar de la interfaz moderna de Facebook. Esta es la versión de accesibilidad/bajo ancho de banda que Facebook mantiene para dispositivos básicos.
+La herramienta usa `m.facebook.com`, la versión móvil ligera de Facebook ("weblite"). Originalmente se diseñó contra `mbasic.facebook.com` (la versión HTML estática clásica), pero Meta la retiró — hoy `mbasic.facebook.com` redirige automáticamente a `m.facebook.com`. A diferencia de mbasic, weblite no usa formularios HTML planos: despacha clics vía atributos `data-action-id` y el compositor de posts es un editor de texto enriquecido Lexical (`[role="textbox"][contenteditable="true"]`), el mismo framework que usa Meta en WhatsApp/Instagram Web.
 
-**Ventajas de mbasic:**
+**Por qué sigue siendo más estable que la interfaz completa:**
 
-- **HTML estático**: No usa React, JavaScript dinámico ni shadow DOM.
-- **Selectores estables**: Los atributos `name` de los formularios llevan años sin cambiar.
-- **Independiente del idioma**: Los selectores usan `name` (no texto visible), así que funcionan igual en español, inglés o cualquier idioma.
-- **Rápido**: Páginas livianas, sin JavaScript pesado.
+- Servidor-renderizado (no una SPA de React completa), sin bundle JS pesado.
+- El botón de publicar sigue siendo identificable de forma semántica (`[role="button"]` con texto "POST"), sin depender de nombres de clase generados.
 
-### Selectores utilizados
-
-Estos son los selectores HTML que la herramienta usa para interactuar con Facebook:
+**Selectores utilizados:**
 
 | Paso | Selector | Función |
 |------|----------|---------|
-| Escribir texto | `textarea[name="xc_message"]` | Campo de texto del post |
-| Abrir upload de foto | `input[name="view_photo"]` | Botón para adjuntar foto |
-| Seleccionar archivo | `input[name="file1"]` | Input de archivo para subir imagen |
-| Confirmar foto | `input[name="add_photo_done"]` | Confirmar foto adjunta |
-| Publicar | `input[name="view_post"]` | Botón de enviar publicación |
+| Abrir compositor | `span` con texto "Write something..." (busca el contenedor con `data-action-id` ancestro) | Navega a `/composer/` |
+| Escribir texto | `[role="textbox"][contenteditable="true"]` (editor Lexical) | Campo de texto del post — se escribe con eventos de teclado reales, no `.fill()` |
+| Adjuntar foto | texto "Photos" → `input[type="file"]` (oculto) | Sube la imagen |
+| Publicar | `[role="button"]` con texto "POST" (el último de los dos que aparecen en la página) | Envía el post |
 
 ### Flujo de publicación
 
-1. El navegador (Chromium) se abre con la sesión guardada.
-2. Navega a `https://mbasic.facebook.com/groups/{groupId}`.
-3. Encuentra el `textarea` y escribe el contenido del anuncio.
-4. Si hay imagen, hace clic en "Photo", sube el archivo y confirma.
-5. Hace clic en el botón de publicar.
-6. Espera a que la página cargue confirmando el envío.
-7. Cierra el navegador.
+1. El navegador (Chromium) se abre con la sesión guardada, con un User-Agent móvil Android.
+2. Navega a `https://m.facebook.com/groups/{groupId}` y espera unos segundos (simula lectura).
+3. Hace clic en "Write something..." → navega a `/composer/`.
+4. Escribe el contenido con velocidad de tecleo variable en el editor Lexical.
+5. Si hay imagen, hace clic en "Photos", sube el archivo.
+6. Hace clic en el botón "POST".
+7. Espera a que la página redirija de vuelta al grupo (confirma el envío) y cierra el navegador.
 
 ### Limitaciones
 
-- **1 imagen por publicación**: mbasic solo permite subir una imagen a la vez.
-- **Sesión**: La sesión puede expirar después de varias semanas. Si las publicaciones empiezan a fallar, ejecutar `npm run cli -- login` de nuevo.
-- **2FA**: Si tu cuenta tiene autenticación de dos factores, debes hacer el login manual.
+- **1 imagen por publicación**: al igual que antes, solo se sube una imagen por post.
+- **Sesión**: puede expirar después de varias semanas. Si las publicaciones empiezan a fallar, ejecutar `npm run cli -- login` de nuevo.
+- **2FA**: si tu cuenta tiene autenticación de dos factores, debes hacer el login manual.
+- **Aprobación de admin**: muchos grupos moderados retienen los posts de miembros para revisión — un post "exitoso" (sin error) puede quedar pendiente de aprobación antes de ser visible públicamente. Ver sección 12.
+- **Markup frágil**: al no haber atributos `name` estables como en mbasic, Meta puede cambiar la estructura de weblite sin aviso. Si la publicación empieza a fallar con errores `COMPOSER_TRIGGER_NOT_FOUND` o `COMPOSER_TEXTBOX_NOT_FOUND`, revisar `src/lib/publishers/playwright-publisher.ts`.
 
 ---
 
@@ -514,6 +512,10 @@ Se puede filtrar por estado:
 | `PLAYWRIGHT_USER_DATA_DIR` | string | `./data/browser-session` | Ruta de sesión del navegador |
 | `RETRY_ATTEMPTS` | number | `2` | Intentos de reintento |
 | `RETRY_DELAY_MS` | number | `5000` | Milisegundos entre reintentos |
+| `SCHEDULER_JITTER_MIN_MINUTES` | number | `0` | Espera aleatoria mínima (min) tras cada disparo de cron antes de publicar |
+| `SCHEDULER_JITTER_MAX_MINUTES` | number | `20` | Espera aleatoria máxima (min) tras cada disparo de cron antes de publicar |
+| `SCHEDULER_GLOBAL_MIN_GAP_MINUTES` | number | `8` | Espaciado mínimo entre cualquier par de posts, sin importar el grupo |
+| `SCHEDULER_MAX_POSTS_PER_DAY_TOTAL` | number | `12` | Tope diario de publicaciones exitosas para toda la cuenta |
 
 ### Base de datos
 
@@ -539,7 +541,7 @@ fb-publisher/
 │   │   ├── config.ts       # Lectura de configuración
 │   │   ├── db/             # Base de datos y repositorios
 │   │   ├── templates/      # Motor de plantillas determinista
-│   │   ├── publishers/     # Publisher con Playwright + mbasic
+│   │   ├── publishers/     # Publisher con Playwright + m.facebook.com
 │   │   ├── scheduler/      # Programación con cron
 │   │   └── cli/            # Interfaz de línea de comandos
 │   └── app/
@@ -593,3 +595,24 @@ npm run cli -- publish <groupId> <templateId>
 # 6. O iniciar el dashboard web
 npm run dev
 ```
+
+---
+
+## 12. Evitar detección como actividad sospechosa
+
+El scheduler ya aplica automáticamente (ver variables en la sección 11):
+
+- **Jitter aleatorio**: cada publicación programada espera un tiempo aleatorio (`SCHEDULER_JITTER_MIN/MAX_MINUTES`) antes de ejecutarse, para no publicar siempre a la hora exacta del cron.
+- **Espaciado global mínimo** (`SCHEDULER_GLOBAL_MIN_GAP_MINUTES`): nunca publica dos posts (en cualquier grupo) más seguido que este intervalo, evitando ráfagas.
+- **Tope diario total de la cuenta** (`SCHEDULER_MAX_POSTS_PER_DAY_TOTAL`), independiente del límite por grupo.
+- **Tipeo con velocidad variable** y pausas ocasionales, en vez de tipeo a ritmo constante.
+- **Tiempo de lectura simulado**: espera unos segundos tras cargar la página del grupo antes de interactuar, como haría una persona.
+
+Lo que el código **no puede resolver por sí solo** — decisiones que dependen de ti:
+
+- **No agregues los 10 grupos al scheduler el primer día.** Empieza con 1-2 grupos donde ya seas miembro activo (con tiempo, comentarios/likes previos), y ve sumando el resto gradualmente en el curso de semanas. Una cuenta nueva en un grupo que empieza a postear de inmediato y seguido es la señal más fuerte de spam para Facebook y para los moderadores humanos.
+- **Respeta la cola de aprobación.** Si un grupo tiene "Pending admin approval" activado (ver sección 9), no lo satures con más posts mientras uno sigue pendiente — parece ignorar la moderación.
+- **Varía el contenido real, no solo la plantilla.** Publicar el mismo texto (aunque rotado con variables) en los 10 grupos el mismo día es un patrón de cross-posting detectable. Preferible: contenido distinto por grupo, o al menos con más separación temporal entre grupos similares.
+- **Interactúa como cuenta real de vez en cuando** (dar like, comentar en otros posts) fuera del flujo automatizado — una cuenta que solo publica y nunca interactúa de otra forma es un patrón atípico.
+- **Un solo dispositivo/sesión.** No mezcles la sesión de `data/browser-session/` con logins simultáneos desde otro navegador o dispositivo — accesos concurrentes desde ubicaciones o huellas de navegador distintas es una señal clásica de compromiso de cuenta que Facebook vigila activamente.
+- **No cambies user-agent, ubicación o IP entre ejecuciones.** El User-Agent móvil fijo y el mismo perfil persistente ya ayudan; no agregues proxies o VPNs rotativos pensando que "ocultan" la automatización — para una única cuenta logueada, cambiar de IP frecuentemente es más sospechoso que mantener una IP estable.

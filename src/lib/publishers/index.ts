@@ -3,7 +3,7 @@ import { PlaywrightPublisher } from './playwright-publisher';
 
 /**
  * Publisher manager.
- * Uses Playwright with mbasic.facebook.com for all publishing.
+ * Uses Playwright with m.facebook.com for all publishing.
  */
 export class PublisherManager {
   private playwright: PlaywrightPublisher;

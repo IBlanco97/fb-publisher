@@ -1,5 +1,7 @@
 // ─── Core domain types for Facebook Publisher Tool ───
 
+export type MembershipStatus = 'unknown' | 'member' | 'not_member' | 'pending' | 'error';
+
 export interface FacebookGroup {
   id: string;
   name: string;
@@ -10,6 +12,8 @@ export interface FacebookGroup {
   maxPostsPerDay: number;
   cooldownMinutes: number; // minimum minutes between posts
   lastPublishedAt?: string; // ISO date
+  membershipStatus: MembershipStatus;
+  membershipCheckedAt?: string; // ISO date of the last check
   createdAt: string;
   updatedAt: string;
 }
@@ -71,6 +75,12 @@ export interface AppConfig {
   publishing: {
     retryAttempts: number;
     retryDelayMs: number;
+  };
+  behavior: {
+    jitterMinMinutes: number; // random delay applied after a cron tick fires, before publishing
+    jitterMaxMinutes: number;
+    globalMinGapMinutes: number; // minimum spacing between ANY two posts, across all groups
+    maxPostsPerDayTotal: number; // account-wide daily cap, independent of per-group limits
   };
 }
 

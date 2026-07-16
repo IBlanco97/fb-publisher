@@ -9,11 +9,11 @@ import { startScheduler, triggerRule, stopAll } from '../scheduler/scheduler';
 const args = process.argv.slice(2);
 const command = args[0];
 
-function createPublisher() {
+function createPublisher(headlessOverride?: boolean) {
   const config = getConfig();
   return new PublisherManager({
     playwrightUserDataDir: config.playwright.userDataDir,
-    playwrightHeadless: config.playwright.headless,
+    playwrightHeadless: headlessOverride ?? config.playwright.headless,
   });
 }
 
@@ -41,7 +41,7 @@ async function main() {
 function printHelp() {
   console.log(`
   FB Publisher CLI - Publicador de anuncios en grupos de Facebook
-  Usa mbasic.facebook.com con Playwright para máxima estabilidad.
+  Usa m.facebook.com con Playwright para máxima estabilidad.
 
   Comandos:
     login                               Abrir navegador para iniciar sesión en Facebook
@@ -73,7 +73,7 @@ function printHelp() {
 }
 
 /**
- * Opens a visible browser to mbasic.facebook.com for manual login.
+ * Opens a visible browser to m.facebook.com for manual login.
  * The session is saved in data/browser-session/ for future use.
  */
 async function handleLogin() {
@@ -92,9 +92,9 @@ async function handleLogin() {
   });
 
   const page = context.pages()[0] || (await context.newPage());
-  await page.goto('https://mbasic.facebook.com');
+  await page.goto('https://m.facebook.com');
 
-  console.log('Navegador abierto en mbasic.facebook.com');
+  console.log('Navegador abierto en m.facebook.com');
   console.log('Esperando a que cierres el navegador...');
 
   // Wait until the browser is closed by the user
@@ -241,7 +241,8 @@ function handlePreview(args: string[]) {
 }
 
 async function handlePublish(args: string[]) {
-  const publisher = createPublisher();
+  const noHeadless = args.includes('--no-headless');
+  const publisher = createPublisher(noHeadless ? false : undefined);
 
   const rotationFlag = args.indexOf('--rotation');
   const rotation = rotationFlag !== -1 ? parseInt(args[rotationFlag + 1], 10) : 0;
@@ -280,7 +281,7 @@ async function handlePublish(args: string[]) {
   if (!template) { console.log('Plantilla no encontrada.'); return; }
 
   const rendered = renderTemplate(template, rotation);
-  console.log(`\nPublicando en "${group.name}" via mbasic.facebook.com...`);
+  console.log(`\nPublicando en "${group.name}" via m.facebook.com...`);
   console.log(`Contenido:\n${rendered.text}\n`);
 
   const result = await publisher.publish(group.fbGroupId, rendered.text, template.images);
@@ -356,7 +357,7 @@ function handleStatus() {
   const failed = publications.filter((p) => p.status === 'failed').length;
 
   console.log(`
-  FB Publisher - Estado (Playwright + mbasic.facebook.com)
+  FB Publisher - Estado (Playwright + m.facebook.com)
   ─────────────────────────────────
   Grupos:         ${groups.length} (${groups.filter((g) => g.isActive).length} activos)
   Plantillas:     ${templates.length} (${templates.filter((t) => t.isActive).length} activas)

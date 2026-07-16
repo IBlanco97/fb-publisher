@@ -20,14 +20,14 @@ export const groupsRepo = {
     return row ? rowToGroup(row) : null;
   },
 
-  create(data: Omit<FacebookGroup, 'id' | 'createdAt' | 'updatedAt'>): FacebookGroup {
+  create(data: Omit<FacebookGroup, 'id' | 'createdAt' | 'updatedAt' | 'membershipStatus' | 'membershipCheckedAt'>): FacebookGroup {
     const id = uuid();
     const now = new Date().toISOString();
     getDb().prepare(`
       INSERT INTO groups (id, name, fb_group_id, url, category, is_active, max_posts_per_day, cooldown_minutes)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, data.name, data.fbGroupId, data.url, data.category ?? null, data.isActive ? 1 : 0, data.maxPostsPerDay, data.cooldownMinutes);
-    return { ...data, id, createdAt: now, updatedAt: now };
+    return { ...data, id, createdAt: now, updatedAt: now, membershipStatus: 'unknown' };
   },
 
   update(id: string, data: Partial<FacebookGroup>): void {
@@ -40,6 +40,8 @@ export const groupsRepo = {
     if (data.maxPostsPerDay !== undefined) { fields.push('max_posts_per_day = ?'); values.push(data.maxPostsPerDay); }
     if (data.cooldownMinutes !== undefined) { fields.push('cooldown_minutes = ?'); values.push(data.cooldownMinutes); }
     if (data.lastPublishedAt !== undefined) { fields.push('last_published_at = ?'); values.push(data.lastPublishedAt); }
+    if (data.membershipStatus !== undefined) { fields.push('membership_status = ?'); values.push(data.membershipStatus); }
+    if (data.membershipCheckedAt !== undefined) { fields.push('membership_checked_at = ?'); values.push(data.membershipCheckedAt); }
     fields.push("updated_at = datetime('now')");
     getDb().prepare(`UPDATE groups SET ${fields.join(', ')} WHERE id = ?`).run(...values, id);
   },
@@ -141,6 +143,23 @@ export const publicationsRepo = {
     `).get(groupId) as any;
     return row?.count ?? 0;
   },
+
+  countTodayTotal(): number {
+    const row = getDb().prepare(`
+      SELECT COUNT(*) as count FROM publications
+      WHERE status = 'success' AND date(published_at) = date('now')
+    `).get() as any;
+    return row?.count ?? 0;
+  },
+
+  getLastSuccessfulPublishedAt(): string | null {
+    const row = getDb().prepare(`
+      SELECT published_at FROM publications
+      WHERE status = 'success' AND published_at IS NOT NULL
+      ORDER BY published_at DESC LIMIT 1
+    `).get() as any;
+    return row?.published_at ?? null;
+  },
 };
 
 // ─── Schedule Rules ───
@@ -202,6 +221,7 @@ function rowToGroup(row: any): FacebookGroup {
     category: row.category,
     isActive: !!row.is_active, maxPostsPerDay: row.max_posts_per_day,
     cooldownMinutes: row.cooldown_minutes, lastPublishedAt: row.last_published_at,
+    membershipStatus: row.membership_status ?? 'unknown', membershipCheckedAt: row.membership_checked_at,
     createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }

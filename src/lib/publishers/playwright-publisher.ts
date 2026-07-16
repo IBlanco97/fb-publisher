@@ -1,14 +1,20 @@
 import path from 'path';
 import type { Publisher, PublishResult } from '../types';
 
+function randomBetween(minMs: number, maxMs: number): number {
+  return Math.round(minMs + Math.random() * (maxMs - minMs));
+}
+
 /**
- * Playwright-based Facebook publisher using mbasic.facebook.com.
+ * Playwright-based Facebook publisher using m.facebook.com ("weblite").
  *
- * Uses the mobile basic version of Facebook which renders static HTML
- * instead of the dynamic React-based modern UI. This makes selectors
- * simple and extremely stable across Facebook updates.
- *
- * Inspired by github.com/adar2/Facebook-Posts-Automation
+ * mbasic.facebook.com (Facebook's old static-HTML mobile interface) was
+ * retired by Meta — it now redirects to m.facebook.com. The weblite UI is
+ * server-rendered but dispatches clicks via obfuscated `data-action-id`
+ * attributes instead of plain forms, and the post composer is a Lexical
+ * rich-text editor (`[role="textbox"][contenteditable="true"]`), not a
+ * `<textarea>`. Selectors here are therefore less stable than the old
+ * mbasic ones and may need updating if Meta changes weblite markup.
  *
  * Each deterministic function is isolated to facilitate future
  * self-healing via Claude Code (Phase 2).
@@ -54,7 +60,7 @@ export class PlaywrightPublisher implements Publisher {
         throw new Error('LOGIN_REQUIRED: Could not log in to Facebook. Run with PLAYWRIGHT_HEADLESS=false to log in manually.');
       }
 
-      // Publish using mbasic.facebook.com (static HTML, stable selectors)
+      // Publish using m.facebook.com weblite composer
       const postResult = await this.createPost(page, groupId, content, images);
 
       return {
@@ -81,7 +87,7 @@ export class PlaywrightPublisher implements Publisher {
    * For first-time setup, run with PLAYWRIGHT_HEADLESS=false.
    */
   private async ensureLoggedIn(page: any): Promise<boolean> {
-    await page.goto('https://mbasic.facebook.com', {
+    await page.goto('https://m.facebook.com', {
       waitUntil: 'domcontentloaded',
       timeout: 15000,
     });
@@ -107,23 +113,25 @@ export class PlaywrightPublisher implements Publisher {
     await page.click('input[name="login"]');
     await page.waitForLoadState('domcontentloaded');
 
-    // Check if login succeeded — mbasic redirects to feed on success
+    // Check if login succeeded — m.facebook.com redirects to feed on success
     const stillHasLogin = await page.$('input[name="email"]');
     return !stillHasLogin;
   }
 
   /**
-   * DETERMINISTIC FUNCTION: Create a post in a Facebook group via mbasic.
+   * DETERMINISTIC FUNCTION: Create a post in a Facebook group via m.facebook.com.
    *
-   * mbasic.facebook.com uses simple HTML forms with stable name attributes:
-   *   - textarea[name="xc_message"] → post text
-   *   - input[name="view_photo"]   → open photo upload
-   *   - input[name="file1"]        → file input
-   *   - input[name="add_photo_done"] → confirm photo
-   *   - input[name="view_post"]    → submit post
-   *
-   * These selectors have been stable for years because mbasic is
-   * Facebook's accessibility/low-bandwidth interface.
+   * Flow (weblite composer, no plain forms):
+   *   1. Open the group page and click the "Write something..." trigger,
+   *      which navigates to m.facebook.com/composer/
+   *   2. Click the Lexical textbox ([role="textbox"][contenteditable="true"])
+   *      and type the content via real keyboard events (no .fill() — Lexical
+   *      doesn't reflect direct value assignment)
+   *   3. If an image is provided, click "Photos" and set the hidden
+   *      input[type="file"]
+   *   4. Click the sticky bottom POST button ([role="button"] with text
+   *      "POST" — there are two matches on the page; the composer's own
+   *      submit button is the last one in DOM order)
    */
   private async createPost(
     page: any,
@@ -131,79 +139,129 @@ export class PlaywrightPublisher implements Publisher {
     content: string,
     images?: string[]
   ): Promise<string | undefined> {
-    // Step 1: Navigate to the group on mbasic
-    const groupUrl = `https://mbasic.facebook.com/groups/${groupId}`;
+    // Step 1: Navigate to the group on m.facebook.com
+    const groupUrl = `https://m.facebook.com/groups/${groupId}`;
     await page.goto(groupUrl, {
       waitUntil: 'domcontentloaded',
-      timeout: 15000,
+      timeout: 20000,
     });
+    // Human-like dwell time — a bot that posts the instant the page loads
+    // is an easy behavioral signal; a real person skims the feed first
+    await page.waitForTimeout(randomBetween(2500, 6000));
 
-    // Verify we're on a group page (not an error page)
     const pageTitle = await page.title();
     if (pageTitle.includes('Error') || pageTitle.includes('Page Not Found')) {
       throw new Error(`GROUP_NOT_FOUND: Could not load group ${groupId}`);
     }
 
-    // Step 2: Fill the post text
-    const textbox = await page.$('textarea[name="xc_message"]');
-    if (!textbox) {
-      throw new Error('COMPOSER_NOT_FOUND: Could not find textarea[name="xc_message"] on mbasic group page');
-    }
-    await textbox.fill(content);
+    // Step 2: Click the composer trigger to open the post composer
+    const composerOpened = await page.evaluate(() => {
+      const triggerText = /write something|escrib[ei] algo/i;
+      const spans = Array.from(document.querySelectorAll('span'));
+      const target = spans.find((s) => triggerText.test(s.textContent || ''));
+      if (!target) return false;
+      let el: HTMLElement | null = target as HTMLElement;
+      while (el && !el.hasAttribute('data-action-id')) el = el.parentElement;
+      if (el) {
+        el.click();
+        return true;
+      }
+      return false;
+    });
 
-    // Step 3: Upload image if provided
+    if (!composerOpened) {
+      throw new Error(
+        'COMPOSER_TRIGGER_NOT_FOUND: Could not find the "Write something..." composer trigger. ' +
+        'The account may not be a member of this group, or Facebook changed the weblite markup.'
+      );
+    }
+
+    await page.waitForURL('**/composer/**', { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(randomBetween(1500, 3000));
+
+    // Step 3: Click the Lexical text editor and type the content at a
+    // human-plausible, variable typing speed (a bot typing every post at a
+    // perfectly constant rate is itself a detectable fingerprint)
+    const textbox = page.locator('[role="textbox"][contenteditable="true"]').first();
+    const textboxCount = await page.locator('[role="textbox"][contenteditable="true"]').count();
+    if (textboxCount === 0) {
+      throw new Error('COMPOSER_TEXTBOX_NOT_FOUND: Could not find the Lexical [role="textbox"] editor on the composer page');
+    }
+    await textbox.click();
+    await this.typeLikeHuman(page, content);
+    await page.waitForTimeout(randomBetween(800, 2000));
+
+    // Step 4: Upload image if provided
     if (images && images.length > 0) {
       await this.attachImage(page, images[0]);
     }
 
-    // Step 4: Submit the post
-    const postBtn = await page.$('input[name="view_post"]');
-    if (!postBtn) {
-      throw new Error('POST_BUTTON_NOT_FOUND: Could not find input[name="view_post"]');
+    // Step 5: Submit the post — the composer's submit button is the last
+    // "POST" role=button on the page (the first is a header link)
+    const postButtons = page.locator('[role="button"]', { hasText: 'POST' });
+    const postButtonCount = await postButtons.count();
+    if (postButtonCount === 0) {
+      throw new Error('POST_BUTTON_NOT_FOUND: Could not find a [role="button"] with text "POST"');
     }
-    await postBtn.click();
+    await postButtons.last().click();
 
-    // Step 5: Wait for post to be submitted
     await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(2000);
 
-    // Step 6: Upload additional images (mbasic only allows 1 per upload)
-    // If there are more images, we'd need to edit the post or create comments
-    // For now, first image only
-
-    console.log(`[Playwright] Posted to group ${groupId} via mbasic.facebook.com`);
+    console.log(`[Playwright] Posted to group ${groupId} via m.facebook.com`);
     return undefined;
   }
 
   /**
-   * DETERMINISTIC FUNCTION: Attach a single image to a post via mbasic.
+   * Types text with per-character delay varying between keystrokes, instead
+   * of a fixed rate, to avoid the constant-cadence fingerprint of scripted
+   * input. Occasionally pauses briefly mid-sentence, like someone thinking.
+   */
+  private async typeLikeHuman(page: any, text: string): Promise<void> {
+    const chunks = text.split(/(?<=[.,\n])/); // split keeping punctuation, natural pause points
+    for (const chunk of chunks) {
+      await page.keyboard.type(chunk, { delay: randomBetween(35, 110) });
+      if (Math.random() < 0.25) {
+        await page.waitForTimeout(randomBetween(200, 700));
+      }
+    }
+  }
+
+  /**
+   * DETERMINISTIC FUNCTION: Attach a single image to a post via m.facebook.com.
    *
-   * mbasic flow: click "Photo" → file input appears → select file → confirm
+   * Flow: click "Photos" label → hidden input[type="file"] appears → set file
    */
   private async attachImage(page: any, imagePath: string): Promise<void> {
-    // Click the "Add Photo" / "Photo" button
-    const photoBtn = await page.$('input[name="view_photo"]');
-    if (!photoBtn) {
-      console.log('[Playwright] Photo upload button not found, posting text only');
+    const photosClicked = await page.evaluate(() => {
+      const candidates = Array.from(document.querySelectorAll('span, div'));
+      const target = candidates.find((el) => el.textContent?.trim() === 'Photos');
+      if (!target) return false;
+      let el: HTMLElement | null = target as HTMLElement;
+      while (el && !el.hasAttribute('data-action-id') && el.getAttribute('role') !== 'button') {
+        el = el.parentElement;
+      }
+      if (el) {
+        el.click();
+        return true;
+      }
+      return false;
+    });
+
+    if (!photosClicked) {
+      console.log('[Playwright] "Photos" button not found, posting text only');
       return;
     }
-    await photoBtn.click();
-    await page.waitForLoadState('domcontentloaded');
 
-    // Upload the file
-    const fileInput = await page.$('input[name="file1"]');
-    if (!fileInput) {
-      throw new Error('FILE_INPUT_NOT_FOUND: Could not find input[name="file1"]');
+    await page.waitForTimeout(1500);
+
+    const fileInput = page.locator('input[type="file"]').first();
+    if ((await fileInput.count()) === 0) {
+      throw new Error('FILE_INPUT_NOT_FOUND: Could not find input[type="file"] after clicking Photos');
     }
 
-    // Resolve to absolute path
     const absolutePath = path.resolve(imagePath);
     await fileInput.setInputFiles(absolutePath);
-
-    // Confirm the photo
-    const doneBtn = await page.$('input[name="add_photo_done"]');
-    if (doneBtn) {
-      await doneBtn.click();
-      await page.waitForLoadState('domcontentloaded');
-    }
+    await page.waitForTimeout(2000);
   }
 }

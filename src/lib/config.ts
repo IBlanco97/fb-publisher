@@ -13,5 +13,11 @@ export function getConfig(): AppConfig {
       retryAttempts: parseInt(process.env.RETRY_ATTEMPTS || '2', 10),
       retryDelayMs: parseInt(process.env.RETRY_DELAY_MS || '5000', 10),
     },
+    behavior: {
+      jitterMinMinutes: parseInt(process.env.SCHEDULER_JITTER_MIN_MINUTES || '0', 10),
+      jitterMaxMinutes: parseInt(process.env.SCHEDULER_JITTER_MAX_MINUTES || '20', 10),
+      globalMinGapMinutes: parseInt(process.env.SCHEDULER_GLOBAL_MIN_GAP_MINUTES || '8', 10),
+      maxPostsPerDayTotal: parseInt(process.env.SCHEDULER_MAX_POSTS_PER_DAY_TOTAL || '12', 10),
+    },
   };
 }

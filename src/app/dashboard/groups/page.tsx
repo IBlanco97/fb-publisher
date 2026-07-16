@@ -3,10 +3,19 @@
 import { useEffect, useState } from 'react';
 import type { FacebookGroup } from '@/lib/types';
 
+const MEMBERSHIP_LABELS: Record<string, { label: string; className: string }> = {
+  member: { label: 'Miembro', className: 'bg-green-500/20 text-green-400' },
+  not_member: { label: 'No miembro', className: 'bg-red-500/20 text-red-400' },
+  pending: { label: 'Solicitud pendiente', className: 'bg-yellow-500/20 text-yellow-400' },
+  error: { label: 'Error al verificar', className: 'bg-gray-700 text-gray-400' },
+  unknown: { label: 'Sin verificar', className: 'bg-gray-700 text-gray-400' },
+};
+
 export default function GroupsPage() {
   const [groups, setGroups] = useState<FacebookGroup[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [checkingId, setCheckingId] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: '',
     fbGroupId: '',
@@ -57,6 +66,16 @@ export default function GroupsPage() {
       body: JSON.stringify({ isActive: !group.isActive }),
     });
     fetchGroups();
+  }
+
+  async function checkMembership(group: FacebookGroup) {
+    setCheckingId(group.id);
+    try {
+      await fetch(`/api/groups/${group.id}/check-membership`, { method: 'POST' });
+      await fetchGroups();
+    } finally {
+      setCheckingId(null);
+    }
   }
 
   function startEdit(group: FacebookGroup) {
@@ -192,12 +211,19 @@ export default function GroupsPage() {
           groups.map((group) => (
             <div key={group.id} className="bg-gray-900 rounded-xl border border-gray-800 p-4 flex items-center justify-between">
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className={`w-2 h-2 rounded-full ${group.isActive ? 'bg-green-500' : 'bg-gray-600'}`} />
                   <span className="font-medium">{group.name}</span>
                   {group.category && (
                     <span className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded">{group.category}</span>
                   )}
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded font-medium ${
+                      MEMBERSHIP_LABELS[group.membershipStatus ?? 'unknown'].className
+                    }`}
+                  >
+                    {MEMBERSHIP_LABELS[group.membershipStatus ?? 'unknown'].label}
+                  </span>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
                   ID: {group.fbGroupId} · máx {group.maxPostsPerDay}/día · cooldown {group.cooldownMinutes}min
@@ -207,8 +233,20 @@ export default function GroupsPage() {
                     Última publicación: {new Date(group.lastPublishedAt).toLocaleString()}
                   </p>
                 )}
+                {group.membershipCheckedAt && (
+                  <p className="text-xs text-gray-600 mt-0.5">
+                    Membresía verificada: {new Date(group.membershipCheckedAt).toLocaleString()}
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-2 ml-4">
+                <button
+                  onClick={() => checkMembership(group)}
+                  disabled={checkingId === group.id}
+                  className="px-3 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded text-xs transition-colors"
+                >
+                  {checkingId === group.id ? 'Verificando…' : 'Verificar membresía'}
+                </button>
                 <button
                   onClick={() => toggleActive(group)}
                   className={`px-3 py-1 rounded text-xs font-medium transition-colors ${

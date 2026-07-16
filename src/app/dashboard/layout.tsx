@@ -48,7 +48,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         <div className="p-4 border-t border-gray-800">
           <div className="text-xs text-gray-500">
-            Método: <span className="text-gray-400">Playwright (mbasic.facebook.com)</span>
+            Método: <span className="text-gray-400">Playwright (m.facebook.com)</span>
           </div>
         </div>
       </aside>

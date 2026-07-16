@@ -83,6 +83,24 @@ function initSchema(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_publications_group ON publications(group_id);
     CREATE INDEX IF NOT EXISTS idx_publications_scheduled ON publications(scheduled_at);
   `);
+
+  migrateGroupsMembershipColumns(db);
+}
+
+/**
+ * Adds membership tracking columns to a `groups` table created before they
+ * existed. SQLite has no "ADD COLUMN IF NOT EXISTS", so check first.
+ */
+function migrateGroupsMembershipColumns(db: Database.Database) {
+  const columns = db.prepare(`PRAGMA table_info(groups)`).all() as Array<{ name: string }>;
+  const columnNames = new Set(columns.map((c) => c.name));
+
+  if (!columnNames.has('membership_status')) {
+    db.exec(`ALTER TABLE groups ADD COLUMN membership_status TEXT NOT NULL DEFAULT 'unknown'`);
+  }
+  if (!columnNames.has('membership_checked_at')) {
+    db.exec(`ALTER TABLE groups ADD COLUMN membership_checked_at TEXT`);
+  }
 }
 
 export function closeDb() {
