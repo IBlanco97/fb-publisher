@@ -272,7 +272,7 @@ Las plantillas definen el contenido de los anuncios usando variables reemplazabl
 
 ### Sintaxis de variables
 
-Las variables se escriben con la sintaxis `{{nombreVariable}}` dentro del cuerpo de la plantilla.
+Las variables se escriben con la sintaxis `{{nombreVariable}}` dentro del cuerpo de la plantilla. También se tolera espacio dentro de las llaves (`{{ nombreVariable }}`), por si copiás el texto de otro lado con ese formato.
 
 **Ejemplo de plantilla:**
 
@@ -367,6 +367,14 @@ El índice avanza siempre, incluso si la publicación falla, para evitar reinten
 
 El scheduler permite configurar publicaciones automáticas usando expresiones cron.
 
+> **⚠️ Crear una regla aquí no la ejecuta.** El dashboard solo guarda la configuración de la regla (grupos, plantillas, cron, jitter). Para que efectivamente se publique sola, hace falta dejar corriendo en una terminal aparte:
+>
+> ```bash
+> npm run cli -- schedule start
+> ```
+>
+> Ese proceso queda bloqueado ejecutándose — es el que revisa el cron de cada regla y dispara las publicaciones. Si cerrás esa terminal, las reglas siguen apareciendo como "Activo" en el dashboard pero no publican nada. La página de Configuración muestra este mismo aviso.
+
 ### Crear una regla de programación
 
 1. Ir a **Configuración** en el menú lateral.
@@ -376,8 +384,11 @@ El scheduler permite configurar publicaciones automáticas usando expresiones cr
    - **Grupos**: Seleccionar en qué grupos publicar.
    - **Plantillas**: Seleccionar qué plantillas usar.
    - **Frecuencia**: Elegir un preset o escribir una expresión cron personalizada.
-   - **Zona horaria**: Seleccionar la zona horaria.
+   - **Aplicar demora aleatoria (jitter)**: casilla activada por defecto. Con ella activa, la regla espera un tiempo aleatorio (`SCHEDULER_JITTER_MIN/MAX_MINUTES`, sección 11) después de cada disparo de cron antes de publicar, para no parecer bot. Desactivarla solo para pruebas donde interesa que publique apenas llega la hora exacta.
+   - **Zona horaria**: Seleccionar la zona horaria. El dashboard recuerda la última zona horaria usada (guardada en el navegador) y la pre-selecciona la próxima vez que creás una regla.
 4. Clic en **"Crear regla de programación"**.
+
+La lista de reglas debajo del formulario muestra, por cada una, el cron, la zona horaria, cuántos grupos y plantillas usa, el índice de rotación actual y si el jitter está `on` u `off`.
 
 ### Presets de frecuencia
 
@@ -474,6 +485,8 @@ La herramienta usa `m.facebook.com`, la versión móvil ligera de Facebook ("web
 ### Desde el Dashboard
 
 La sección **Publicaciones** muestra el historial completo con:
+
+> Esta pantalla se actualiza sola cada 4 segundos (se ve un aviso "se actualiza sola cada 4s" junto al título) — no hace falta recargar la página para ver publicaciones nuevas del scheduler.
 
 - **Contenido**: El texto que se publicó.
 - **Estado**: El resultado de la publicación.

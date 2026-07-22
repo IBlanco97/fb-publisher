@@ -85,6 +85,7 @@ function initSchema(db: Database.Database) {
   `);
 
   migrateGroupsMembershipColumns(db);
+  migrateScheduleRulesJitterColumn(db);
 }
 
 /**
@@ -100,6 +101,18 @@ function migrateGroupsMembershipColumns(db: Database.Database) {
   }
   if (!columnNames.has('membership_checked_at')) {
     db.exec(`ALTER TABLE groups ADD COLUMN membership_checked_at TEXT`);
+  }
+}
+
+/**
+ * Adds the jitter opt-out column to `schedule_rules` created before it existed.
+ */
+function migrateScheduleRulesJitterColumn(db: Database.Database) {
+  const columns = db.prepare(`PRAGMA table_info(schedule_rules)`).all() as Array<{ name: string }>;
+  const columnNames = new Set(columns.map((c) => c.name));
+
+  if (!columnNames.has('use_jitter')) {
+    db.exec(`ALTER TABLE schedule_rules ADD COLUMN use_jitter INTEGER NOT NULL DEFAULT 1`);
   }
 }
 

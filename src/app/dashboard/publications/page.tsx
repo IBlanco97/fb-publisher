@@ -9,6 +9,8 @@ export default function PublicationsPage() {
 
   useEffect(() => {
     fetchPublications();
+    const interval = setInterval(fetchPublications, 4000);
+    return () => clearInterval(interval);
   }, [filter]);
 
   async function fetchPublications() {
@@ -26,7 +28,10 @@ export default function PublicationsPage() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold mb-6">Publicaciones</h2>
+      <div className="flex items-center gap-2 mb-6">
+        <h2 className="text-2xl font-bold">Publicaciones</h2>
+        <span className="text-xs text-gray-500">se actualiza sola cada 4s</span>
+      </div>
 
       {/* Filters */}
       <div className="flex gap-2 mb-6">

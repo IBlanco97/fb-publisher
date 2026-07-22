@@ -8,7 +8,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { name, groupIds, templateIds, cronExpression, timezone } = body;
+  const { name, groupIds, templateIds, cronExpression, timezone, useJitter } = body;
 
   if (!name || !cronExpression) {
     return NextResponse.json({ error: 'name and cronExpression are required' }, { status: 400 });
@@ -22,6 +22,7 @@ export async function POST(req: NextRequest) {
     rotationIndex: 0,
     isActive: true,
     timezone: timezone || 'America/Bogota',
+    useJitter: useJitter ?? true,
   });
 
   return NextResponse.json(rule, { status: 201 });

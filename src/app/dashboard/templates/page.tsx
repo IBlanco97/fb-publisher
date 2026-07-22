@@ -9,6 +9,7 @@ export default function TemplatesPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [previewIndex, setPreviewIndex] = useState(0);
+  const [previewTemplate, setPreviewTemplate] = useState<AdTemplate | null>(null);
   const [form, setForm] = useState({
     name: '',
     body: '',
@@ -16,6 +17,7 @@ export default function TemplatesPage() {
     tags: [] as string[],
   });
   const [newTag, setNewTag] = useState('');
+  const [valuesText, setValuesText] = useState<Record<number, string>>({});
 
   useEffect(() => {
     fetchTemplates();
@@ -52,11 +54,13 @@ export default function TemplatesPage() {
     fetchTemplates();
   }
 
-  async function handlePreview(template: AdTemplate) {
+  async function handlePreview(template: AdTemplate, index = 0) {
+    setPreviewTemplate(template);
+    setPreviewIndex(index);
     const res = await fetch('/api/templates/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ templateId: template.id, rotationIndex: previewIndex }),
+      body: JSON.stringify({ templateId: template.id, rotationIndex: index }),
     });
     const data = await res.json();
     setPreview(data.text);
@@ -83,6 +87,15 @@ export default function TemplatesPage() {
       ...f,
       variables: f.variables.filter((_, i) => i !== index),
     }));
+    setValuesText((t) => {
+      const next: Record<number, string> = {};
+      Object.entries(t).forEach(([i, text]) => {
+        const idx = Number(i);
+        if (idx < index) next[idx] = text;
+        else if (idx > index) next[idx - 1] = text;
+      });
+      return next;
+    });
   }
 
   function addTag() {
@@ -100,6 +113,7 @@ export default function TemplatesPage() {
       variables: template.variables,
       tags: template.tags || [],
     });
+    setValuesText({});
     setShowForm(true);
   }
 
@@ -107,7 +121,9 @@ export default function TemplatesPage() {
     setShowForm(false);
     setEditingId(null);
     setPreview(null);
+    setPreviewTemplate(null);
     setForm({ name: '', body: '', variables: [], tags: [] });
+    setValuesText({});
   }
 
   return (
@@ -176,10 +192,12 @@ export default function TemplatesPage() {
                   <option value="list">Lista</option>
                 </select>
                 <input
-                  value={v.values.join(', ')}
-                  onChange={(e) =>
-                    updateVariable(i, 'values', e.target.value.split(',').map((s) => s.trim()).filter(Boolean))
-                  }
+                  value={valuesText[i] ?? v.values.join(', ')}
+                  onChange={(e) => {
+                    const text = e.target.value;
+                    setValuesText((t) => ({ ...t, [i]: text }));
+                    updateVariable(i, 'values', text.split(',').map((s) => s.trim()).filter(Boolean));
+                  }}
                   className="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm"
                   placeholder="valor1, valor2, valor3"
                 />
@@ -235,13 +253,13 @@ export default function TemplatesPage() {
             <h3 className="text-sm font-medium text-blue-400">Vista previa (rotación #{previewIndex})</h3>
             <div className="flex gap-2">
               <button
-                onClick={() => setPreviewIndex((i) => Math.max(0, i - 1))}
+                onClick={() => previewTemplate && handlePreview(previewTemplate, Math.max(0, previewIndex - 1))}
                 className="px-2 py-1 bg-gray-700 rounded text-xs"
               >
                 ← Anterior
               </button>
               <button
-                onClick={() => setPreviewIndex((i) => i + 1)}
+                onClick={() => previewTemplate && handlePreview(previewTemplate, previewIndex + 1)}
                 className="px-2 py-1 bg-gray-700 rounded text-xs"
               >
                 Siguiente →

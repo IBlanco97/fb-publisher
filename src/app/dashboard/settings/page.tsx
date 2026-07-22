@@ -3,6 +3,9 @@
 import { useEffect, useState } from 'react';
 import type { ScheduleRule } from '@/lib/types';
 
+const LAST_TIMEZONE_KEY = 'fb-publisher:last-timezone';
+const DEFAULT_TIMEZONE = 'America/Bogota';
+
 export default function SettingsPage() {
   const [schedules, setSchedules] = useState<ScheduleRule[]>([]);
   const [groups, setGroups] = useState<any[]>([]);
@@ -13,11 +16,16 @@ export default function SettingsPage() {
     groupIds: [] as string[],
     templateIds: [] as string[],
     cronExpression: '0 9,14,19 * * *',
-    timezone: 'America/Bogota',
+    timezone: DEFAULT_TIMEZONE,
+    useJitter: true,
   });
 
   useEffect(() => {
     fetchAll();
+    const savedTimezone = localStorage.getItem(LAST_TIMEZONE_KEY);
+    if (savedTimezone) {
+      setForm((f) => ({ ...f, timezone: savedTimezone }));
+    }
   }, []);
 
   async function fetchAll() {
@@ -39,7 +47,7 @@ export default function SettingsPage() {
       body: JSON.stringify(form),
     });
     setShowForm(false);
-    setForm({ name: '', groupIds: [], templateIds: [], cronExpression: '0 9,14,19 * * *', timezone: 'America/Bogota' });
+    setForm((f) => ({ name: '', groupIds: [], templateIds: [], cronExpression: '0 9,14,19 * * *', timezone: f.timezone, useJitter: true }));
     fetchAll();
   }
 
@@ -83,6 +91,20 @@ export default function SettingsPage() {
         >
           {showForm ? 'Cancelar' : '+ Nueva regla'}
         </button>
+      </div>
+
+      <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 mb-6 text-sm text-amber-200">
+        <p className="font-medium mb-1">⚠️ Las reglas de aquí no se ejecutan solas</p>
+        <p className="text-amber-200/80">
+          Este dashboard solo crea y edita reglas — para que se publiquen automáticamente necesitás
+          dejar corriendo, en una terminal aparte, el proceso del scheduler:
+        </p>
+        <code className="block bg-gray-900 rounded px-3 py-2 mt-2 font-mono text-xs">npm run cli -- schedule start</code>
+        <p className="text-amber-200/80 mt-2">
+          Ese comando queda bloqueado ejecutándose (es el que dispara las publicaciones según el cron
+          de cada regla) — si cerrás esa terminal, las reglas activas dejan de publicarse aunque sigan
+          marcadas como &quot;Activo&quot; en la lista de abajo.
+        </p>
       </div>
 
       {/* Create schedule form */}
@@ -172,10 +194,31 @@ export default function SettingsPage() {
           </div>
 
           <div>
+            <label className="flex items-center gap-2 text-sm text-gray-300">
+              <input
+                type="checkbox"
+                checked={form.useJitter}
+                onChange={(e) => setForm((f) => ({ ...f, useJitter: e.target.checked }))}
+                className="rounded border-gray-700 bg-gray-800"
+              />
+              Aplicar demora aleatoria (jitter) antes de publicar
+            </label>
+            <p className="text-xs text-gray-600 mt-1">
+              Recomendado dejarlo activo en producción para no publicar siempre a la hora exacta
+              (parece actividad de bot). Desactivalo solo para pruebas donde querés que publique apenas
+              llega la hora programada.
+            </p>
+          </div>
+
+          <div>
             <label className="block text-sm text-gray-400 mb-1">Zona horaria</label>
             <select
               value={form.timezone}
-              onChange={(e) => setForm((f) => ({ ...f, timezone: e.target.value }))}
+              onChange={(e) => {
+                const timezone = e.target.value;
+                setForm((f) => ({ ...f, timezone }));
+                localStorage.setItem(LAST_TIMEZONE_KEY, timezone);
+              }}
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm"
             >
               <option value="America/Bogota">America/Bogota (COT)</option>
@@ -211,7 +254,7 @@ export default function SettingsPage() {
                   <p className="text-xs text-gray-500 mt-1">
                     <span className="font-mono">{rule.cronExpression}</span> · {rule.timezone} ·
                     {rule.groupIds.length} grupos · {rule.templateIds.length} plantillas ·
-                    rotación #{rule.rotationIndex}
+                    rotación #{rule.rotationIndex} · jitter {rule.useJitter ? 'on' : 'off'}
                   </p>
                 </div>
                 <div className="flex gap-2">

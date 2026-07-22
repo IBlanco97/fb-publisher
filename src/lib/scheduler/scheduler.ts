@@ -102,7 +102,7 @@ async function executeRule(
 
   const { behavior } = getConfig();
 
-  if (opts.applyJitter && (behavior.jitterMaxMinutes > 0 || behavior.jitterMinMinutes > 0)) {
+  if (opts.applyJitter && rule.useJitter && (behavior.jitterMaxMinutes > 0 || behavior.jitterMinMinutes > 0)) {
     const jitterMs = randomJitterMs(behavior.jitterMinMinutes, behavior.jitterMaxMinutes);
     console.log(`[Scheduler] Rule "${rule.name}": esperando ${Math.round(jitterMs / 1000 / 60)} min antes de publicar (jitter)`);
     await sleep(jitterMs);

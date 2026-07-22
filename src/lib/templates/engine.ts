@@ -21,10 +21,11 @@ export function renderTemplate(template: AdTemplate, rotationIndex: number): Ren
     }
   }
 
-  // Replace {{variable}} placeholders in the template body
+  // Replace {{variable}} placeholders in the template body (tolerating whitespace like {{ variable }})
   let text = template.body;
   for (const [name, value] of Object.entries(variableValues)) {
-    text = text.replaceAll(`{{${name}}}`, value);
+    const pattern = new RegExp(`\\{\\{\\s*${escapeRegExp(name)}\\s*\\}\\}`, 'g');
+    text = text.replace(pattern, value);
   }
 
   return {
@@ -67,6 +68,10 @@ function getComboForIndex(
 export function getTotalCombinations(variables: TemplateVariable[]): number {
   if (variables.length === 0) return 1;
   return variables.reduce((total, v) => total * Math.max(v.values.length, 1), 1);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**

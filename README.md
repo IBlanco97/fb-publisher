@@ -14,6 +14,10 @@ Herramienta para automatizar publicaciones en grupos de Facebook, con rotación 
 |---|---|
 | ![Plantillas](docs/screenshots/templates.png) | ![Configuración](docs/screenshots/settings.png) |
 
+| Publicaciones |
+|---|
+| ![Publicaciones](docs/screenshots/publications.png) |
+
 ## Características
 
 - **Dashboard web** (Next.js) para gestionar grupos, plantillas, programación y ver historial de publicaciones — sin tocar código ni JSON.
@@ -40,6 +44,8 @@ npm run dev                # dashboard en http://localhost:3000
 ```
 
 Ver la [guía completa de instalación y primer uso](./MANUAL.md#1-instalación-y-configuración) en el manual.
+
+> **Nota:** crear reglas de programación desde el dashboard no las ejecuta solas — hace falta dejar corriendo aparte `npm run cli -- schedule start` (ver [sección 8 del manual](./MANUAL.md#8-programación-automática-scheduler)).
 
 ## Estructura del proyecto
 

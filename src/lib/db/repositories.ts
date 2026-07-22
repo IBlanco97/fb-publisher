@@ -184,9 +184,9 @@ export const scheduleRepo = {
     const id = uuid();
     const now = new Date().toISOString();
     getDb().prepare(`
-      INSERT INTO schedule_rules (id, name, group_ids, template_ids, cron_expression, rotation_index, is_active, timezone)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, data.name, JSON.stringify(data.groupIds), JSON.stringify(data.templateIds), data.cronExpression, data.rotationIndex, data.isActive ? 1 : 0, data.timezone);
+      INSERT INTO schedule_rules (id, name, group_ids, template_ids, cron_expression, rotation_index, is_active, timezone, use_jitter)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, data.name, JSON.stringify(data.groupIds), JSON.stringify(data.templateIds), data.cronExpression, data.rotationIndex, data.isActive ? 1 : 0, data.timezone, data.useJitter ? 1 : 0);
     return { ...data, id, createdAt: now, updatedAt: now };
   },
 
@@ -204,6 +204,7 @@ export const scheduleRepo = {
     if (data.isActive !== undefined) { fields.push('is_active = ?'); values.push(data.isActive ? 1 : 0); }
     if (data.timezone !== undefined) { fields.push('timezone = ?'); values.push(data.timezone); }
     if (data.rotationIndex !== undefined) { fields.push('rotation_index = ?'); values.push(data.rotationIndex); }
+    if (data.useJitter !== undefined) { fields.push('use_jitter = ?'); values.push(data.useJitter ? 1 : 0); }
     fields.push("updated_at = datetime('now')");
     getDb().prepare(`UPDATE schedule_rules SET ${fields.join(', ')} WHERE id = ?`).run(...values, id);
   },
@@ -249,6 +250,7 @@ function rowToSchedule(row: any): ScheduleRule {
     id: row.id, name: row.name, groupIds: JSON.parse(row.group_ids),
     templateIds: JSON.parse(row.template_ids), cronExpression: row.cron_expression,
     rotationIndex: row.rotation_index, isActive: !!row.is_active,
-    timezone: row.timezone, createdAt: row.created_at, updatedAt: row.updated_at,
+    timezone: row.timezone, useJitter: !!row.use_jitter,
+    createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }

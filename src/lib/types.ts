@@ -61,6 +61,7 @@ export interface ScheduleRule {
   rotationIndex: number; // current position in deterministic rotation
   isActive: boolean;
   timezone: string;
+  useJitter: boolean; // whether to apply the random anti-detection delay before publishing
   createdAt: string;
   updatedAt: string;
 }
