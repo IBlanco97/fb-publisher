@@ -1,3 +1,5 @@
+import type { ProxyConfig } from '../types';
+
 /**
  * Checks whether the logged-in Facebook account is a member of a group,
  * using the same persistent Playwright session as the publisher. Read-only
@@ -5,7 +7,7 @@
  */
 export async function checkGroupMembership(
   fbGroupId: string,
-  opts: { userDataDir: string; headless?: boolean }
+  opts: { userDataDir: string; headless?: boolean; proxy?: ProxyConfig }
 ): Promise<'member' | 'not_member' | 'pending' | 'error'> {
   try {
     const { chromium } = await import('playwright');
@@ -15,6 +17,7 @@ export async function checkGroupMembership(
       viewport: { width: 480, height: 800 },
       userAgent:
         'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
+      proxy: opts.proxy,
     });
 
     try {

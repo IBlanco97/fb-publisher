@@ -1,9 +1,10 @@
-import type { PublishResult } from '../types';
+import type { PublishResult, ProxyConfig } from '../types';
 import { PlaywrightPublisher } from './playwright-publisher';
 
 /**
  * Publisher manager.
  * Uses Playwright with m.facebook.com for all publishing.
+ * Bound to a single Facebook account's session + proxy for its lifetime.
  */
 export class PublisherManager {
   private playwright: PlaywrightPublisher;
@@ -11,10 +12,12 @@ export class PublisherManager {
   constructor(config: {
     playwrightUserDataDir: string;
     playwrightHeadless?: boolean;
+    proxy?: ProxyConfig;
   }) {
     this.playwright = new PlaywrightPublisher({
       userDataDir: config.playwrightUserDataDir,
       headless: config.playwrightHeadless ?? true,
+      proxy: config.proxy,
     });
   }
 

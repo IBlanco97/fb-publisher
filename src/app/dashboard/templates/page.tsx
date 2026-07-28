@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import type { AdTemplate, TemplateVariable } from '@/lib/types';
+import { useAccount } from '../account-context';
 
 export default function TemplatesPage() {
+  const { accountId } = useAccount();
   const [templates, setTemplates] = useState<AdTemplate[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -20,28 +22,28 @@ export default function TemplatesPage() {
   const [valuesText, setValuesText] = useState<Record<number, string>>({});
 
   useEffect(() => {
+    resetForm();
     fetchTemplates();
-  }, []);
+  }, [accountId]);
 
   async function fetchTemplates() {
-    const res = await fetch('/api/templates');
+    const res = await fetch(`/api/templates?accountId=${accountId}`);
     setTemplates(await res.json());
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const payload = { ...form, body: form.body };
     if (editingId) {
       await fetch(`/api/templates/${editingId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(form),
       });
     } else {
       await fetch('/api/templates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...form, accountId }),
       });
     }
     resetForm();

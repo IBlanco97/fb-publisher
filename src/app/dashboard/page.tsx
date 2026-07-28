@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useAccount } from './account-context';
 
 interface Stats {
   totalGroups: number;
@@ -13,14 +14,17 @@ interface Stats {
 }
 
 export default function DashboardPage() {
+  const { accountId, accounts } = useAccount();
   const [stats, setStats] = useState<Stats | null>(null);
+  const selectedAccount = accounts.find((a) => a.id === accountId);
 
   useEffect(() => {
+    setStats(null);
     async function fetchStats() {
       const [groups, templates, publications] = await Promise.all([
-        fetch('/api/groups').then((r) => r.json()),
-        fetch('/api/templates').then((r) => r.json()),
-        fetch('/api/publications?limit=10').then((r) => r.json()),
+        fetch(`/api/groups?accountId=${accountId}`).then((r) => r.json()),
+        fetch(`/api/templates?accountId=${accountId}`).then((r) => r.json()),
+        fetch(`/api/publications?limit=10&accountId=${accountId}`).then((r) => r.json()),
       ]);
 
       const successful = publications.filter((p: any) => p.status === 'success').length;
@@ -40,7 +44,7 @@ export default function DashboardPage() {
       });
     }
     fetchStats();
-  }, []);
+  }, [accountId]);
 
   if (!stats) {
     return (
@@ -52,7 +56,7 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold mb-6">Dashboard</h2>
+      <h2 className="text-2xl font-bold mb-6">Dashboard{selectedAccount ? ` — ${selectedAccount.name}` : ''}</h2>
 
       {/* Stats cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

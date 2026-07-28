@@ -18,6 +18,8 @@ Usa Playwright con `m.facebook.com` (la versión móvil ligera de Facebook) para
 9. [Cómo funciona la publicación (m.facebook.com)](#9-cómo-funciona-la-publicación)
 10. [Historial de publicaciones](#10-historial-de-publicaciones)
 11. [Referencia de configuración](#11-referencia-de-configuración)
+12. [Evitar detección como actividad sospechosa](#12-evitar-detección-como-actividad-sospechosa)
+13. [Múltiples cuentas de Facebook](#13-múltiples-cuentas-de-facebook)
 
 ---
 
@@ -90,6 +92,8 @@ Antes de publicar, necesitas iniciar sesión en Facebook para que la herramienta
 ```bash
 npm run cli -- login
 ```
+
+Si manejas varias cuentas de Facebook, agrega `--account <id>` (ver [sección 13](#13-múltiples-cuentas-de-facebook)). Sin ese flag, todos los comandos operan sobre la cuenta `default` (la única que existe si no has creado ninguna otra).
 
 Esto:
 1. Abre un navegador visible en `m.facebook.com`
@@ -164,6 +168,9 @@ npm run cli -- <comando> [opciones]
 
 | Comando | Descripción |
 |---------|-------------|
+| `accounts list` | Listar cuentas de Facebook configuradas |
+| `accounts add <nombre> [--proxy <url>]` | Agregar una cuenta (proxy opcional) |
+| `accounts remove <id>` | Eliminar una cuenta |
 | `login` | Abrir navegador para iniciar sesión en Facebook |
 | `status` | Ver estado general del sistema |
 | `groups list` | Listar todos los grupos |
@@ -176,7 +183,7 @@ npm run cli -- <comando> [opciones]
 | `publish <groupId> <templateId>` | Publicar manualmente |
 | `publish --all` | Publicar en todos los grupos activos |
 | `schedule list` | Listar reglas de programación |
-| `schedule start` | Iniciar el scheduler automático |
+| `schedule start` | Iniciar el scheduler automático (todas las cuentas activas) |
 | `schedule trigger <ruleId>` | Ejecutar una regla manualmente |
 | `schedule stop` | Detener el scheduler |
 
@@ -184,6 +191,7 @@ npm run cli -- <comando> [opciones]
 
 | Opción | Descripción |
 |--------|-------------|
+| `--account <id>` | Cuenta a usar (ver [sección 13](#13-múltiples-cuentas-de-facebook)); por defecto `default` |
 | `--rotation <número>` | Índice de rotación específico |
 | `--no-headless` | Mostrar ventana del navegador |
 
@@ -522,13 +530,14 @@ Se puede filtrar por estado:
 | `FB_EMAIL` | string | `""` | Email para login automático (opcional) |
 | `FB_PASSWORD` | string | `""` | Password para login automático (opcional) |
 | `PLAYWRIGHT_HEADLESS` | boolean | `true` | Navegador invisible |
-| `PLAYWRIGHT_USER_DATA_DIR` | string | `./data/browser-session` | Ruta de sesión del navegador |
+| `PLAYWRIGHT_USER_DATA_DIR` | string | `./data/browser-session` | Ruta de sesión del navegador de la cuenta `default` (las demás cuentas usan `data/browser-sessions/{id}/` automáticamente) |
 | `RETRY_ATTEMPTS` | number | `2` | Intentos de reintento |
 | `RETRY_DELAY_MS` | number | `5000` | Milisegundos entre reintentos |
 | `SCHEDULER_JITTER_MIN_MINUTES` | number | `0` | Espera aleatoria mínima (min) tras cada disparo de cron antes de publicar |
 | `SCHEDULER_JITTER_MAX_MINUTES` | number | `20` | Espera aleatoria máxima (min) tras cada disparo de cron antes de publicar |
-| `SCHEDULER_GLOBAL_MIN_GAP_MINUTES` | number | `8` | Espaciado mínimo entre cualquier par de posts, sin importar el grupo |
-| `SCHEDULER_MAX_POSTS_PER_DAY_TOTAL` | number | `12` | Tope diario de publicaciones exitosas para toda la cuenta |
+| `SCHEDULER_GLOBAL_MIN_GAP_MINUTES` | number | `8` | Espaciado mínimo entre posts de la MISMA cuenta, sin importar el grupo |
+| `SCHEDULER_MAX_POSTS_PER_DAY_TOTAL` | number | `12` | Tope diario de publicaciones exitosas POR cuenta |
+| `SCHEDULER_CROSS_ACCOUNT_MIN_GAP_MINUTES` | number | `3` | Espaciado mínimo entre posts de cuentas DISTINTAS (ver [sección 13](#13-múltiples-cuentas-de-facebook)) |
 
 ### Base de datos
 
@@ -627,5 +636,64 @@ Lo que el código **no puede resolver por sí solo** — decisiones que dependen
 - **Respeta la cola de aprobación.** Si un grupo tiene "Pending admin approval" activado (ver sección 9), no lo satures con más posts mientras uno sigue pendiente — parece ignorar la moderación.
 - **Varía el contenido real, no solo la plantilla.** Publicar el mismo texto (aunque rotado con variables) en los 10 grupos el mismo día es un patrón de cross-posting detectable. Preferible: contenido distinto por grupo, o al menos con más separación temporal entre grupos similares.
 - **Interactúa como cuenta real de vez en cuando** (dar like, comentar en otros posts) fuera del flujo automatizado — una cuenta que solo publica y nunca interactúa de otra forma es un patrón atípico.
-- **Un solo dispositivo/sesión.** No mezcles la sesión de `data/browser-session/` con logins simultáneos desde otro navegador o dispositivo — accesos concurrentes desde ubicaciones o huellas de navegador distintas es una señal clásica de compromiso de cuenta que Facebook vigila activamente.
-- **No cambies user-agent, ubicación o IP entre ejecuciones.** El User-Agent móvil fijo y el mismo perfil persistente ya ayudan; no agregues proxies o VPNs rotativos pensando que "ocultan" la automatización — para una única cuenta logueada, cambiar de IP frecuentemente es más sospechoso que mantener una IP estable.
+- **Un solo dispositivo/sesión por cuenta.** No mezcles la sesión de una cuenta (`data/browser-sessions/{id}/`) con logins simultáneos desde otro navegador o dispositivo — accesos concurrentes desde ubicaciones o huellas de navegador distintas es una señal clásica de compromiso de cuenta que Facebook vigila activamente.
+- **No cambies user-agent, ubicación o IP entre ejecuciones de la misma cuenta.** El User-Agent móvil fijo y el mismo perfil persistente ya ayudan; no rotes el proxy de una cuenta pensando que "oculta" la automatización — para una cuenta dada, cambiar de IP frecuentemente es más sospechoso que mantener una IP estable. Si manejas varias cuentas, cada una necesita su propia IP fija, no una IP compartida ni una rotativa (ver [sección 13](#13-múltiples-cuentas-de-facebook)).
+
+---
+
+## 13. Múltiples cuentas de Facebook
+
+Cada cuenta tiene su propio proxy fijo y su propia sesión de navegador — están completamente aisladas entre sí (grupos, plantillas, historial y programaciones distintos).
+
+### Desde el dashboard
+
+En el sidebar hay un selector **"Cuenta activa"** arriba de la navegación: cambia qué cuenta ven y editan Grupos, Plantillas, Publicaciones, Configuración y el Overview. La pantalla **Cuentas** (ícono 🔑) permite crear, editar (incluyendo el proxy) y eliminar cuentas sin tocar la terminal. El login inicial de cada cuenta sigue siendo manual por CLI (ver más abajo) — el dashboard no puede abrir un navegador visible.
+
+### Desde el CLI
+
+### Por qué proxy por cuenta
+
+Facebook vincula cuentas que comparten señales: misma IP, mismo fingerprint de navegador, mismos horarios de publicación. Si dos cuentas publican desde la misma IP, Meta las asocia como "red de cuentas" — si una cae en revisión, arrastra a las demás. Por eso cada cuenta nueva necesita una **IP fija propia** (no rotativa: cambiar de IP seguido en una misma cuenta es tan sospechoso como compartir IP entre cuentas).
+
+### Crear una cuenta
+
+```bash
+npm run cli -- accounts add "Cuenta Ventas Norte" --proxy http://usuario:clave@1.2.3.4:8080
+npm run cli -- accounts list
+```
+
+El proxy es opcional al crear la cuenta — sin él, esa cuenta sale a internet con la IP de la máquina donde corre la herramienta (correcto solo para una única cuenta, o la cuenta `default`).
+
+### Login por cuenta
+
+```bash
+npm run cli -- login --account <id>
+```
+
+Igual que el login de una sola cuenta: abre un navegador visible (ya usando el proxy asignado), inicias sesión manualmente, y la sesión queda guardada en `data/browser-sessions/<id>/` — aislada de las demás cuentas.
+
+### Operar una cuenta específica
+
+Todos los comandos de grupos, plantillas y publicación manual aceptan `--account <id>`:
+
+```bash
+npm run cli -- groups add "Grupo X" "https://facebook.com/groups/123" --account <id>
+npm run cli -- templates add "Anuncio" "Texto..." --account <id>
+npm run cli -- publish <groupId> <templateId> --account <id>
+```
+
+Sin `--account`, todos estos comandos operan sobre la cuenta `default`.
+
+### Scheduler con varias cuentas
+
+```bash
+npm run cli -- schedule start
+```
+
+Un solo `schedule start` levanta las reglas de **todas** las cuentas activas a la vez, cada una publicando con su propia sesión y proxy. Además de los límites por cuenta (tope diario, espaciado mínimo — sección 11), el scheduler aplica un espaciado mínimo *entre cuentas distintas* (`SCHEDULER_CROSS_ACCOUNT_MIN_GAP_MINUTES`, default 3 minutos) para que dos cuentas no publiquen en el mismo instante, aunque cada una tenga su propio proxy.
+
+### Lo que no resuelve el código
+
+- **Credenciales de Facebook no se guardan.** El login de cada cuenta nueva sigue siendo manual la primera vez (y si la sesión expira).
+- **El proxy debe ser fijo y de calidad** (residencial o datacenter reputado) — un proxy compartido con otros usuarios o de mala reputación puede ser tan detectable como no tener proxy.
+- **El ritmo de calentamiento de cada cuenta nueva sigue siendo manual** (sección 12): no le asignes a una cuenta recién creada 10 grupos desde el día uno solo porque ahora es técnicamente posible.

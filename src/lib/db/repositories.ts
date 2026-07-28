@@ -1,17 +1,68 @@
 import { v4 as uuid } from 'uuid';
 import { getDb } from './database';
-import type { FacebookGroup, AdTemplate, Publication, ScheduleRule } from '../types';
+import type { FacebookAccount, FacebookGroup, AdTemplate, Publication, ScheduleRule } from '../types';
+
+// ─── Accounts ───
+
+export const accountsRepo = {
+  getAll(): FacebookAccount[] {
+    const rows = getDb().prepare('SELECT * FROM accounts ORDER BY name').all() as any[];
+    return rows.map(rowToAccount);
+  },
+
+  getActive(): FacebookAccount[] {
+    const rows = getDb().prepare('SELECT * FROM accounts WHERE is_active = 1 ORDER BY name').all() as any[];
+    return rows.map(rowToAccount);
+  },
+
+  getById(id: string): FacebookAccount | null {
+    const row = getDb().prepare('SELECT * FROM accounts WHERE id = ?').get(id) as any;
+    return row ? rowToAccount(row) : null;
+  },
+
+  create(data: Omit<FacebookAccount, 'id' | 'createdAt' | 'updatedAt'>): FacebookAccount {
+    const id = uuid();
+    const now = new Date().toISOString();
+    getDb().prepare(`
+      INSERT INTO accounts (id, name, proxy_server, proxy_username, proxy_password, is_active)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, data.name, data.proxy?.server ?? null, data.proxy?.username ?? null, data.proxy?.password ?? null, data.isActive ? 1 : 0);
+    return { ...data, id, createdAt: now, updatedAt: now };
+  },
+
+  update(id: string, data: Partial<Omit<FacebookAccount, 'proxy'>> & { proxy?: FacebookAccount['proxy'] | null }): void {
+    const fields: string[] = [];
+    const values: any[] = [];
+    if (data.name !== undefined) { fields.push('name = ?'); values.push(data.name); }
+    if (data.proxy !== undefined) {
+      fields.push('proxy_server = ?'); values.push(data.proxy?.server ?? null);
+      fields.push('proxy_username = ?'); values.push(data.proxy?.username ?? null);
+      fields.push('proxy_password = ?'); values.push(data.proxy?.password ?? null);
+    }
+    if (data.isActive !== undefined) { fields.push('is_active = ?'); values.push(data.isActive ? 1 : 0); }
+    fields.push("updated_at = datetime('now')");
+    getDb().prepare(`UPDATE accounts SET ${fields.join(', ')} WHERE id = ?`).run(...values, id);
+  },
+
+  delete(id: string): void {
+    getDb().prepare('DELETE FROM accounts WHERE id = ?').run(id);
+  },
+};
 
 // ─── Groups ───
 
 export const groupsRepo = {
-  getAll(): FacebookGroup[] {
-    const rows = getDb().prepare('SELECT * FROM groups ORDER BY name').all() as any[];
+  getAll(accountId?: string): FacebookGroup[] {
+    const rows = accountId
+      ? getDb().prepare('SELECT * FROM groups WHERE account_id = ? ORDER BY name').all(accountId) as any[]
+      : getDb().prepare('SELECT * FROM groups ORDER BY name').all() as any[];
     return rows.map(rowToGroup);
   },
 
-  getActive(): FacebookGroup[] {
-    const rows = getDb().prepare('SELECT * FROM groups WHERE is_active = 1 ORDER BY name').all() as any[];
+  getActive(accountId?: string): FacebookGroup[] {
+    const rows = accountId
+      ? getDb().prepare('SELECT * FROM groups WHERE is_active = 1 AND account_id = ? ORDER BY name').all(accountId) as any[]
+      : getDb().prepare('SELECT * FROM groups WHERE is_active = 1 ORDER BY name').all() as any[];
     return rows.map(rowToGroup);
   },
 
@@ -24,9 +75,9 @@ export const groupsRepo = {
     const id = uuid();
     const now = new Date().toISOString();
     getDb().prepare(`
-      INSERT INTO groups (id, name, fb_group_id, url, category, is_active, max_posts_per_day, cooldown_minutes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, data.name, data.fbGroupId, data.url, data.category ?? null, data.isActive ? 1 : 0, data.maxPostsPerDay, data.cooldownMinutes);
+      INSERT INTO groups (id, account_id, name, fb_group_id, url, category, is_active, max_posts_per_day, cooldown_minutes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, data.accountId, data.name, data.fbGroupId, data.url, data.category ?? null, data.isActive ? 1 : 0, data.maxPostsPerDay, data.cooldownMinutes);
     return { ...data, id, createdAt: now, updatedAt: now, membershipStatus: 'unknown' };
   },
 
@@ -54,13 +105,17 @@ export const groupsRepo = {
 // ─── Templates ───
 
 export const templatesRepo = {
-  getAll(): AdTemplate[] {
-    const rows = getDb().prepare('SELECT * FROM templates ORDER BY name').all() as any[];
+  getAll(accountId?: string): AdTemplate[] {
+    const rows = accountId
+      ? getDb().prepare('SELECT * FROM templates WHERE account_id = ? ORDER BY name').all(accountId) as any[]
+      : getDb().prepare('SELECT * FROM templates ORDER BY name').all() as any[];
     return rows.map(rowToTemplate);
   },
 
-  getActive(): AdTemplate[] {
-    const rows = getDb().prepare('SELECT * FROM templates WHERE is_active = 1 ORDER BY name').all() as any[];
+  getActive(accountId?: string): AdTemplate[] {
+    const rows = accountId
+      ? getDb().prepare('SELECT * FROM templates WHERE is_active = 1 AND account_id = ? ORDER BY name').all(accountId) as any[]
+      : getDb().prepare('SELECT * FROM templates WHERE is_active = 1 ORDER BY name').all() as any[];
     return rows.map(rowToTemplate);
   },
 
@@ -73,9 +128,9 @@ export const templatesRepo = {
     const id = uuid();
     const now = new Date().toISOString();
     getDb().prepare(`
-      INSERT INTO templates (id, name, body, variables, images, tags, is_active)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(id, data.name, data.body, JSON.stringify(data.variables), JSON.stringify(data.images ?? []), JSON.stringify(data.tags ?? []), data.isActive ? 1 : 0);
+      INSERT INTO templates (id, account_id, name, body, variables, images, tags, is_active)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, data.accountId, data.name, data.body, JSON.stringify(data.variables), JSON.stringify(data.images ?? []), JSON.stringify(data.tags ?? []), data.isActive ? 1 : 0);
     return { ...data, id, createdAt: now, updatedAt: now };
   },
 
@@ -100,13 +155,17 @@ export const templatesRepo = {
 // ─── Publications ───
 
 export const publicationsRepo = {
-  getAll(limit = 50): Publication[] {
-    const rows = getDb().prepare('SELECT * FROM publications ORDER BY created_at DESC LIMIT ?').all(limit) as any[];
+  getAll(limit = 50, accountId?: string): Publication[] {
+    const rows = accountId
+      ? getDb().prepare('SELECT * FROM publications WHERE account_id = ? ORDER BY created_at DESC LIMIT ?').all(accountId, limit) as any[]
+      : getDb().prepare('SELECT * FROM publications ORDER BY created_at DESC LIMIT ?').all(limit) as any[];
     return rows.map(rowToPublication);
   },
 
-  getByStatus(status: string): Publication[] {
-    const rows = getDb().prepare('SELECT * FROM publications WHERE status = ? ORDER BY created_at DESC').all(status) as any[];
+  getByStatus(status: string, accountId?: string): Publication[] {
+    const rows = accountId
+      ? getDb().prepare('SELECT * FROM publications WHERE status = ? AND account_id = ? ORDER BY created_at DESC').all(status, accountId) as any[]
+      : getDb().prepare('SELECT * FROM publications WHERE status = ? ORDER BY created_at DESC').all(status) as any[];
     return rows.map(rowToPublication);
   },
 
@@ -119,9 +178,9 @@ export const publicationsRepo = {
     const id = uuid();
     const now = new Date().toISOString();
     getDb().prepare(`
-      INSERT INTO publications (id, group_id, template_id, content, status, publish_method, scheduled_at, attempts)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, data.groupId, data.templateId, data.content, data.status, data.publishMethod ?? null, data.scheduledAt ?? null, data.attempts);
+      INSERT INTO publications (id, account_id, group_id, template_id, content, status, publish_method, scheduled_at, attempts)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, data.accountId, data.groupId, data.templateId, data.content, data.status, data.publishMethod ?? null, data.scheduledAt ?? null, data.attempts);
     return { ...data, id, createdAt: now };
   },
 
@@ -144,15 +203,25 @@ export const publicationsRepo = {
     return row?.count ?? 0;
   },
 
-  countTodayTotal(): number {
+  countTodayTotal(accountId: string): number {
     const row = getDb().prepare(`
       SELECT COUNT(*) as count FROM publications
-      WHERE status = 'success' AND date(published_at) = date('now')
-    `).get() as any;
+      WHERE account_id = ? AND status = 'success' AND date(published_at) = date('now')
+    `).get(accountId) as any;
     return row?.count ?? 0;
   },
 
-  getLastSuccessfulPublishedAt(): string | null {
+  getLastSuccessfulPublishedAt(accountId: string): string | null {
+    const row = getDb().prepare(`
+      SELECT published_at FROM publications
+      WHERE account_id = ? AND status = 'success' AND published_at IS NOT NULL
+      ORDER BY published_at DESC LIMIT 1
+    `).get(accountId) as any;
+    return row?.published_at ?? null;
+  },
+
+  /** Last successful publish across ALL accounts — used for the cross-account pacing gap. */
+  getLastSuccessfulPublishedAtAny(): string | null {
     const row = getDb().prepare(`
       SELECT published_at FROM publications
       WHERE status = 'success' AND published_at IS NOT NULL
@@ -165,13 +234,17 @@ export const publicationsRepo = {
 // ─── Schedule Rules ───
 
 export const scheduleRepo = {
-  getAll(): ScheduleRule[] {
-    const rows = getDb().prepare('SELECT * FROM schedule_rules ORDER BY name').all() as any[];
+  getAll(accountId?: string): ScheduleRule[] {
+    const rows = accountId
+      ? getDb().prepare('SELECT * FROM schedule_rules WHERE account_id = ? ORDER BY name').all(accountId) as any[]
+      : getDb().prepare('SELECT * FROM schedule_rules ORDER BY name').all() as any[];
     return rows.map(rowToSchedule);
   },
 
-  getActive(): ScheduleRule[] {
-    const rows = getDb().prepare('SELECT * FROM schedule_rules WHERE is_active = 1').all() as any[];
+  getActive(accountId?: string): ScheduleRule[] {
+    const rows = accountId
+      ? getDb().prepare('SELECT * FROM schedule_rules WHERE is_active = 1 AND account_id = ?').all(accountId) as any[]
+      : getDb().prepare('SELECT * FROM schedule_rules WHERE is_active = 1').all() as any[];
     return rows.map(rowToSchedule);
   },
 
@@ -184,9 +257,9 @@ export const scheduleRepo = {
     const id = uuid();
     const now = new Date().toISOString();
     getDb().prepare(`
-      INSERT INTO schedule_rules (id, name, group_ids, template_ids, cron_expression, rotation_index, is_active, timezone, use_jitter)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, data.name, JSON.stringify(data.groupIds), JSON.stringify(data.templateIds), data.cronExpression, data.rotationIndex, data.isActive ? 1 : 0, data.timezone, data.useJitter ? 1 : 0);
+      INSERT INTO schedule_rules (id, account_id, name, group_ids, template_ids, cron_expression, rotation_index, is_active, timezone, use_jitter)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, data.accountId, data.name, JSON.stringify(data.groupIds), JSON.stringify(data.templateIds), data.cronExpression, data.rotationIndex, data.isActive ? 1 : 0, data.timezone, data.useJitter ? 1 : 0);
     return { ...data, id, createdAt: now, updatedAt: now };
   },
 
@@ -216,9 +289,18 @@ export const scheduleRepo = {
 
 // ─── Row mappers ───
 
+function rowToAccount(row: any): FacebookAccount {
+  return {
+    id: row.id, name: row.name,
+    proxy: row.proxy_server ? { server: row.proxy_server, username: row.proxy_username ?? undefined, password: row.proxy_password ?? undefined } : undefined,
+    isActive: !!row.is_active,
+    createdAt: row.created_at, updatedAt: row.updated_at,
+  };
+}
+
 function rowToGroup(row: any): FacebookGroup {
   return {
-    id: row.id, name: row.name, fbGroupId: row.fb_group_id, url: row.url,
+    id: row.id, accountId: row.account_id, name: row.name, fbGroupId: row.fb_group_id, url: row.url,
     category: row.category,
     isActive: !!row.is_active, maxPostsPerDay: row.max_posts_per_day,
     cooldownMinutes: row.cooldown_minutes, lastPublishedAt: row.last_published_at,
@@ -229,7 +311,7 @@ function rowToGroup(row: any): FacebookGroup {
 
 function rowToTemplate(row: any): AdTemplate {
   return {
-    id: row.id, name: row.name, body: row.body,
+    id: row.id, accountId: row.account_id, name: row.name, body: row.body,
     variables: JSON.parse(row.variables), images: JSON.parse(row.images),
     tags: JSON.parse(row.tags), isActive: !!row.is_active,
     createdAt: row.created_at, updatedAt: row.updated_at,
@@ -238,7 +320,7 @@ function rowToTemplate(row: any): AdTemplate {
 
 function rowToPublication(row: any): Publication {
   return {
-    id: row.id, groupId: row.group_id, templateId: row.template_id,
+    id: row.id, accountId: row.account_id, groupId: row.group_id, templateId: row.template_id,
     content: row.content, status: row.status, publishMethod: row.publish_method,
     error: row.error, fbPostId: row.fb_post_id, scheduledAt: row.scheduled_at,
     publishedAt: row.published_at, attempts: row.attempts, createdAt: row.created_at,
@@ -247,7 +329,7 @@ function rowToPublication(row: any): Publication {
 
 function rowToSchedule(row: any): ScheduleRule {
   return {
-    id: row.id, name: row.name, groupIds: JSON.parse(row.group_ids),
+    id: row.id, accountId: row.account_id, name: row.name, groupIds: JSON.parse(row.group_ids),
     templateIds: JSON.parse(row.template_ids), cronExpression: row.cron_expression,
     rotationIndex: row.rotation_index, isActive: !!row.is_active,
     timezone: row.timezone, useJitter: !!row.use_jitter,

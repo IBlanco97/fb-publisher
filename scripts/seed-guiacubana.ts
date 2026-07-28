@@ -4,6 +4,7 @@
  */
 
 import { groupsRepo, templatesRepo } from '../src/lib/db/repositories';
+import { DEFAULT_ACCOUNT_ID } from '../src/lib/config';
 
 // ─── GRUPOS ───────────────────────────────────────────────────────────────────
 // Reemplaza cada URL con la URL real del grupo de Facebook
@@ -212,6 +213,7 @@ for (const g of groups) {
   const match = g.url.match(/groups\/(\d+)/)
   const fbGroupId = match ? match[1] : g.url
   const created = groupsRepo.create({
+    accountId: DEFAULT_ACCOUNT_ID,
     name: g.name,
     fbGroupId,
     url: g.url,
@@ -225,6 +227,7 @@ for (const g of groups) {
 console.log('\nCargando templates...\n')
 for (const t of templates) {
   const created = templatesRepo.create({
+    accountId: DEFAULT_ACCOUNT_ID,
     name: t.name,
     body: t.body,
     variables: [],

@@ -2,8 +2,24 @@
 
 export type MembershipStatus = 'unknown' | 'member' | 'not_member' | 'pending' | 'error';
 
+export interface ProxyConfig {
+  server: string; // e.g. "http://1.2.3.4:8080"
+  username?: string;
+  password?: string;
+}
+
+export interface FacebookAccount {
+  id: string;
+  name: string;
+  proxy?: ProxyConfig;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface FacebookGroup {
   id: string;
+  accountId: string;
   name: string;
   fbGroupId: string; // Facebook's group ID
   url: string;
@@ -20,6 +36,7 @@ export interface FacebookGroup {
 
 export interface AdTemplate {
   id: string;
+  accountId: string;
   name: string;
   body: string; // template body with {{variables}}
   variables: TemplateVariable[];
@@ -39,6 +56,7 @@ export interface TemplateVariable {
 
 export interface Publication {
   id: string;
+  accountId: string;
   groupId: string;
   templateId: string;
   content: string; // rendered content that was posted
@@ -54,6 +72,7 @@ export interface Publication {
 
 export interface ScheduleRule {
   id: string;
+  accountId: string;
   name: string;
   groupIds: string[]; // groups to publish to
   templateIds: string[]; // templates to rotate through
@@ -80,8 +99,9 @@ export interface AppConfig {
   behavior: {
     jitterMinMinutes: number; // random delay applied after a cron tick fires, before publishing
     jitterMaxMinutes: number;
-    globalMinGapMinutes: number; // minimum spacing between ANY two posts, across all groups
-    maxPostsPerDayTotal: number; // account-wide daily cap, independent of per-group limits
+    globalMinGapMinutes: number; // minimum spacing between ANY two posts of the SAME account
+    maxPostsPerDayTotal: number; // per-account daily cap, independent of per-group limits
+    crossAccountMinGapMinutes: number; // minimum spacing between posts of DIFFERENT accounts
   };
 }
 

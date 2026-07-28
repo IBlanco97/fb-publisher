@@ -26,6 +26,7 @@ Herramienta para automatizar publicaciones en grupos de Facebook, con rotación 
 - **Scheduler con cron**: reglas de programación por grupo/plantilla con expresiones cron o presets ("3x al día", "cada hora", etc.).
 - **Verificación de membresía**: detecta si la cuenta ya es miembro de cada grupo antes de intentar publicar ahí.
 - **Comportamiento anti-detección**: jitter aleatorio entre publicaciones, espaciado global mínimo, tope diario de cuenta, y tecleo con velocidad humana variable — para no verse como actividad de bot. Ver [sección 12 del manual](./MANUAL.md#12-evitar-detección-como-actividad-sospechosa).
+- **Múltiples cuentas de Facebook**: cada cuenta con su propio proxy fijo y sesión de navegador aislada. Se administran desde el dashboard (pantalla "Cuentas" + selector en el sidebar) o por CLI (`accounts add/list/remove`, flag `--account`). Ver [sección 13 del manual](./MANUAL.md#13-múltiples-cuentas-de-facebook).
 
 ## Stack
 

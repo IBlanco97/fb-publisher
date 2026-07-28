@@ -1,24 +1,64 @@
 #!/usr/bin/env node
 
-import { groupsRepo, templatesRepo, publicationsRepo, scheduleRepo } from '../db/repositories';
+import { groupsRepo, templatesRepo, publicationsRepo, scheduleRepo, accountsRepo } from '../db/repositories';
 import { renderTemplate, getTotalCombinations } from '../templates/engine';
 import { PublisherManager } from '../publishers';
-import { getConfig } from '../config';
+import { getConfig, getAccountUserDataDir, DEFAULT_ACCOUNT_ID } from '../config';
 import { startScheduler, triggerRule, stopAll } from '../scheduler/scheduler';
+import type { ProxyConfig } from '../types';
 
 const args = process.argv.slice(2);
 const command = args[0];
 
-function createPublisher(headlessOverride?: boolean) {
+/** Reads `--account <id>` from CLI args, defaulting to the single-account flow. */
+function getAccountIdFlag(args: string[]): string {
+  const flagIndex = args.indexOf('--account');
+  return flagIndex !== -1 ? args[flagIndex + 1] : DEFAULT_ACCOUNT_ID;
+}
+
+/** Strips known flags (and their values) from positional args. */
+function stripFlags(args: string[], flagsWithValue: string[]): string[] {
+  const result: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (flagsWithValue.includes(args[i])) { i++; continue; }
+    result.push(args[i]);
+  }
+  return result;
+}
+
+function parseProxyUrl(input: string): ProxyConfig {
+  const url = new URL(input);
+  const server = `${url.protocol}//${url.hostname}${url.port ? `:${url.port}` : ''}`;
+  return {
+    server,
+    username: url.username ? decodeURIComponent(url.username) : undefined,
+    password: url.password ? decodeURIComponent(url.password) : undefined,
+  };
+}
+
+function requireAccount(accountId: string) {
+  const account = accountsRepo.getById(accountId);
+  if (!account) {
+    console.log(`Cuenta no encontrada: ${accountId}. Usa "accounts list" para ver las cuentas disponibles.`);
+    process.exit(1);
+  }
+  return account!;
+}
+
+function createPublisher(accountId: string, headlessOverride?: boolean) {
   const config = getConfig();
+  const account = requireAccount(accountId);
   return new PublisherManager({
-    playwrightUserDataDir: config.playwright.userDataDir,
+    playwrightUserDataDir: getAccountUserDataDir(accountId),
     playwrightHeadless: headlessOverride ?? config.playwright.headless,
+    proxy: account.proxy,
   });
 }
 
 async function main() {
   switch (command) {
+    case 'accounts':
+      return handleAccounts(args.slice(1));
     case 'groups':
       return handleGroups(args.slice(1));
     case 'templates':
@@ -32,7 +72,7 @@ async function main() {
     case 'preview':
       return handlePreview(args.slice(1));
     case 'login':
-      return handleLogin();
+      return handleLogin(args.slice(1));
     default:
       printHelp();
   }
@@ -44,6 +84,10 @@ function printHelp() {
   Usa m.facebook.com con Playwright para máxima estabilidad.
 
   Comandos:
+    accounts list                       Listar cuentas de Facebook configuradas
+    accounts add <name> [--proxy <url>] Agregar una cuenta (proxy opcional: http://user:pass@host:port)
+    accounts remove <id>                Eliminar una cuenta
+
     login                               Abrir navegador para iniciar sesión en Facebook
 
     groups list                         Listar todos los grupos
@@ -60,35 +104,88 @@ function printHelp() {
     publish --all                       Publicar en todos los grupos activos
 
     schedule list                       Listar reglas de programación
-    schedule start                      Iniciar el scheduler
+    schedule start                      Iniciar el scheduler (todas las cuentas activas)
     schedule trigger <ruleId>           Ejecutar una regla manualmente
     schedule stop                       Detener el scheduler
 
     status                              Ver estado general
 
   Opciones:
+    --account <id>                      Cuenta a usar (default: una sola cuenta "default")
     --rotation <number>                 Índice de rotación
     --no-headless                       Mostrar navegador
   `);
+}
+
+function handleAccounts(args: string[]) {
+  const subcommand = args[0];
+
+  switch (subcommand) {
+    case 'list': {
+      const accounts = accountsRepo.getAll();
+      if (accounts.length === 0) {
+        console.log('No hay cuentas configuradas.');
+        return;
+      }
+      console.log('\nCuentas de Facebook:\n');
+      for (const a of accounts) {
+        const status = a.isActive ? '●' : '○';
+        console.log(`  ${status} ${a.name}`);
+        console.log(`    ID: ${a.id}`);
+        console.log(`    Proxy: ${a.proxy ? a.proxy.server : '(sin proxy)'}`);
+        console.log('');
+      }
+      break;
+    }
+    case 'add': {
+      const proxyFlagIndex = args.indexOf('--proxy');
+      const proxyUrl = proxyFlagIndex !== -1 ? args[proxyFlagIndex + 1] : undefined;
+      const name = stripFlags(args.slice(1), ['--proxy'])[0];
+      if (!name) {
+        console.log('Uso: accounts add <name> [--proxy http://user:pass@host:port]');
+        return;
+      }
+      const account = accountsRepo.create({
+        name,
+        proxy: proxyUrl ? parseProxyUrl(proxyUrl) : undefined,
+        isActive: true,
+      });
+      console.log(`Cuenta creada: ${account.name} (${account.id})`);
+      break;
+    }
+    case 'remove': {
+      const id = args[1];
+      if (!id) { console.log('Uso: accounts remove <id>'); return; }
+      accountsRepo.delete(id);
+      console.log(`Cuenta eliminada: ${id}`);
+      break;
+    }
+    default:
+      console.log('Subcomandos: list, add, remove');
+  }
 }
 
 /**
  * Opens a visible browser to m.facebook.com for manual login.
  * The session is saved in data/browser-session/ for future use.
  */
-async function handleLogin() {
-  console.log('Abriendo navegador para iniciar sesión en Facebook...');
+async function handleLogin(args: string[]) {
+  const accountId = getAccountIdFlag(args);
+  const account = requireAccount(accountId);
+
+  console.log(`Abriendo navegador para iniciar sesión en Facebook (cuenta: ${account.name})...`);
+  if (account.proxy) console.log(`Usando proxy: ${account.proxy.server}`);
   console.log('Inicia sesión manualmente. La sesión se guardará automáticamente.');
   console.log('Cierra el navegador cuando termines.\n');
 
-  const config = getConfig();
   const { chromium } = await import('playwright');
 
-  const context = await chromium.launchPersistentContext(config.playwright.userDataDir, {
+  const context = await chromium.launchPersistentContext(getAccountUserDataDir(accountId), {
     headless: false,
     viewport: { width: 480, height: 800 },
     userAgent:
       'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
+    proxy: account.proxy,
   });
 
   const page = context.pages()[0] || (await context.newPage());
@@ -107,10 +204,12 @@ async function handleLogin() {
 
 function handleGroups(args: string[]) {
   const subcommand = args[0];
+  const accountId = getAccountIdFlag(args);
+  const rest = stripFlags(args.slice(1), ['--account']);
 
   switch (subcommand) {
     case 'list': {
-      const groups = groupsRepo.getAll();
+      const groups = groupsRepo.getAll(accountId);
       if (groups.length === 0) {
         console.log('No hay grupos configurados.');
         return;
@@ -128,15 +227,17 @@ function handleGroups(args: string[]) {
       break;
     }
     case 'add': {
-      const name = args[1];
-      const url = args[2];
+      const name = rest[0];
+      const url = rest[1];
       if (!name || !url) {
-        console.log('Uso: groups add <name> <url>');
+        console.log('Uso: groups add <name> <url> [--account <id>]');
         return;
       }
+      requireAccount(accountId);
       const match = url.match(/groups\/(\d+)/);
       const fbGroupId = match ? match[1] : url;
       const group = groupsRepo.create({
+        accountId,
         name,
         fbGroupId,
         url,
@@ -148,7 +249,7 @@ function handleGroups(args: string[]) {
       break;
     }
     case 'remove': {
-      const id = args[1];
+      const id = rest[0];
       if (!id) { console.log('Uso: groups remove <id>'); return; }
       groupsRepo.delete(id);
       console.log(`Grupo eliminado: ${id}`);
@@ -161,10 +262,12 @@ function handleGroups(args: string[]) {
 
 function handleTemplates(args: string[]) {
   const subcommand = args[0];
+  const accountId = getAccountIdFlag(args);
+  const rest = stripFlags(args.slice(1), ['--account']);
 
   switch (subcommand) {
     case 'list': {
-      const templates = templatesRepo.getAll();
+      const templates = templatesRepo.getAll(accountId);
       if (templates.length === 0) {
         console.log('No hay plantillas configuradas.');
         return;
@@ -180,13 +283,15 @@ function handleTemplates(args: string[]) {
       break;
     }
     case 'add': {
-      const name = args[1];
-      const body = args.slice(2).join(' ');
+      const name = rest[0];
+      const body = rest.slice(1).join(' ');
       if (!name || !body) {
-        console.log('Uso: templates add <name> "<body>"');
+        console.log('Uso: templates add <name> "<body>" [--account <id>]');
         return;
       }
+      requireAccount(accountId);
       const template = templatesRepo.create({
+        accountId,
         name,
         body,
         variables: [],
@@ -196,7 +301,7 @@ function handleTemplates(args: string[]) {
       break;
     }
     case 'remove': {
-      const id = args[1];
+      const id = rest[0];
       if (!id) { console.log('Uso: templates remove <id>'); return; }
       templatesRepo.delete(id);
       console.log(`Plantilla eliminada: ${id}`);
@@ -242,16 +347,18 @@ function handlePreview(args: string[]) {
 
 async function handlePublish(args: string[]) {
   const noHeadless = args.includes('--no-headless');
-  const publisher = createPublisher(noHeadless ? false : undefined);
+  const accountId = getAccountIdFlag(args);
+  const publisher = createPublisher(accountId, noHeadless ? false : undefined);
 
   const rotationFlag = args.indexOf('--rotation');
   const rotation = rotationFlag !== -1 ? parseInt(args[rotationFlag + 1], 10) : 0;
+  const rest = stripFlags(args, ['--account', '--rotation']);
 
-  if (args[0] === '--all') {
-    const groups = groupsRepo.getActive();
-    const templates = templatesRepo.getActive();
+  if (rest[0] === '--all') {
+    const groups = groupsRepo.getActive(accountId);
+    const templates = templatesRepo.getActive(accountId);
     if (groups.length === 0 || templates.length === 0) {
-      console.log('No hay grupos activos o plantillas activas.');
+      console.log('No hay grupos activos o plantillas activas para esta cuenta.');
       return;
     }
 
@@ -267,11 +374,11 @@ async function handlePublish(args: string[]) {
     return;
   }
 
-  const groupId = args[0];
-  const templateId = args[1];
+  const groupId = rest[0];
+  const templateId = rest[1];
 
   if (!groupId || !templateId) {
-    console.log('Uso: publish <groupId> <templateId> [--rotation N]');
+    console.log('Uso: publish <groupId> <templateId> [--rotation N] [--account <id>]');
     return;
   }
 
@@ -287,6 +394,7 @@ async function handlePublish(args: string[]) {
   const result = await publisher.publish(group.fbGroupId, rendered.text, template.images);
 
   publicationsRepo.create({
+    accountId,
     groupId: group.id,
     templateId: template.id,
     content: rendered.text,
@@ -303,11 +411,11 @@ async function handlePublish(args: string[]) {
 
 async function handleSchedule(args: string[]) {
   const subcommand = args[0];
-  const publisher = createPublisher();
 
   switch (subcommand) {
     case 'list': {
-      const rules = scheduleRepo.getAll();
+      const accountId = getAccountIdFlag(args);
+      const rules = args.includes('--account') ? scheduleRepo.getAll(accountId) : scheduleRepo.getAll();
       if (rules.length === 0) {
         console.log('No hay reglas de programación.');
         return;
@@ -317,6 +425,7 @@ async function handleSchedule(args: string[]) {
         const status = r.isActive ? '●' : '○';
         console.log(`  ${status} ${r.name}`);
         console.log(`    ID: ${r.id}`);
+        console.log(`    Cuenta: ${r.accountId}`);
         console.log(`    Cron: ${r.cronExpression} (${r.timezone})`);
         console.log(`    Grupos: ${r.groupIds.length} | Plantillas: ${r.templateIds.length} | Rotación: #${r.rotationIndex}`);
         console.log('');
@@ -324,16 +433,21 @@ async function handleSchedule(args: string[]) {
       break;
     }
     case 'start': {
-      console.log('Iniciando scheduler...');
-      startScheduler(publisher);
+      const noHeadless = args.includes('--no-headless');
+      console.log('Iniciando scheduler (todas las cuentas activas)...');
+      startScheduler(noHeadless ? false : undefined);
       console.log('Scheduler activo. Presiona Ctrl+C para detener.');
       await new Promise(() => {});
       break;
     }
     case 'trigger': {
-      const ruleId = args[1];
+      const rest = stripFlags(args.slice(1), ['--account']);
+      const ruleId = rest[0];
       if (!ruleId) { console.log('Uso: schedule trigger <ruleId>'); return; }
+      const rule = scheduleRepo.getById(ruleId);
+      if (!rule) { console.log('Regla no encontrada.'); return; }
       console.log('Ejecutando regla...');
+      const publisher = createPublisher(rule.accountId);
       await triggerRule(ruleId, publisher);
       break;
     }
@@ -348,6 +462,7 @@ async function handleSchedule(args: string[]) {
 }
 
 function handleStatus() {
+  const accounts = accountsRepo.getAll();
   const groups = groupsRepo.getAll();
   const templates = templatesRepo.getAll();
   const publications = publicationsRepo.getAll(100);
@@ -359,6 +474,7 @@ function handleStatus() {
   console.log(`
   FB Publisher - Estado (Playwright + m.facebook.com)
   ─────────────────────────────────
+  Cuentas:        ${accounts.length} (${accounts.filter((a) => a.isActive).length} activas)
   Grupos:         ${groups.length} (${groups.filter((g) => g.isActive).length} activos)
   Plantillas:     ${templates.length} (${templates.filter((t) => t.isActive).length} activas)
   Programaciones: ${schedules.length} (${schedules.filter((s) => s.isActive).length} activas)

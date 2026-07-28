@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import type { Publication } from '@/lib/types';
+import { useAccount } from '../account-context';
 
 export default function PublicationsPage() {
+  const { accountId } = useAccount();
   const [publications, setPublications] = useState<Publication[]>([]);
   const [filter, setFilter] = useState<string>('all');
 
@@ -11,11 +13,11 @@ export default function PublicationsPage() {
     fetchPublications();
     const interval = setInterval(fetchPublications, 4000);
     return () => clearInterval(interval);
-  }, [filter]);
+  }, [filter, accountId]);
 
   async function fetchPublications() {
-    const params = filter !== 'all' ? `?status=${filter}` : '?limit=100';
-    const res = await fetch(`/api/publications${params}`);
+    const params = filter !== 'all' ? `status=${filter}` : 'limit=100';
+    const res = await fetch(`/api/publications?${params}&accountId=${accountId}`);
     setPublications(await res.json());
   }
 

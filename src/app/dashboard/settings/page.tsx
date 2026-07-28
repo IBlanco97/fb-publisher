@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import type { ScheduleRule } from '@/lib/types';
+import { useAccount } from '../account-context';
 
 const LAST_TIMEZONE_KEY = 'fb-publisher:last-timezone';
 const DEFAULT_TIMEZONE = 'America/Bogota';
 
 export default function SettingsPage() {
+  const { accountId } = useAccount();
   const [schedules, setSchedules] = useState<ScheduleRule[]>([]);
   const [groups, setGroups] = useState<any[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
@@ -21,18 +23,22 @@ export default function SettingsPage() {
   });
 
   useEffect(() => {
-    fetchAll();
     const savedTimezone = localStorage.getItem(LAST_TIMEZONE_KEY);
     if (savedTimezone) {
       setForm((f) => ({ ...f, timezone: savedTimezone }));
     }
   }, []);
 
+  useEffect(() => {
+    setShowForm(false);
+    fetchAll();
+  }, [accountId]);
+
   async function fetchAll() {
     const [s, g, t] = await Promise.all([
-      fetch('/api/scheduler').then((r) => r.json()),
-      fetch('/api/groups').then((r) => r.json()),
-      fetch('/api/templates').then((r) => r.json()),
+      fetch(`/api/scheduler?accountId=${accountId}`).then((r) => r.json()),
+      fetch(`/api/groups?accountId=${accountId}`).then((r) => r.json()),
+      fetch(`/api/templates?accountId=${accountId}`).then((r) => r.json()),
     ]);
     setSchedules(s);
     setGroups(g);
@@ -44,7 +50,7 @@ export default function SettingsPage() {
     await fetch('/api/scheduler', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      body: JSON.stringify({ ...form, accountId }),
     });
     setShowForm(false);
     setForm((f) => ({ name: '', groupIds: [], templateIds: [], cronExpression: '0 9,14,19 * * *', timezone: f.timezone, useJitter: true }));

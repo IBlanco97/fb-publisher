@@ -1,5 +1,5 @@
 import path from 'path';
-import type { Publisher, PublishResult } from '../types';
+import type { Publisher, PublishResult, ProxyConfig } from '../types';
 
 function randomBetween(minMs: number, maxMs: number): number {
   return Math.round(minMs + Math.random() * (maxMs - minMs));
@@ -23,10 +23,12 @@ export class PlaywrightPublisher implements Publisher {
   name = 'playwright' as const;
   private userDataDir: string;
   private headless: boolean;
+  private proxy?: ProxyConfig;
 
-  constructor(opts: { userDataDir: string; headless?: boolean }) {
+  constructor(opts: { userDataDir: string; headless?: boolean; proxy?: ProxyConfig }) {
     this.userDataDir = opts.userDataDir;
     this.headless = opts.headless ?? true;
+    this.proxy = opts.proxy;
   }
 
   async isAvailable(): Promise<boolean> {
@@ -50,6 +52,7 @@ export class PlaywrightPublisher implements Publisher {
         viewport: { width: 480, height: 800 },
         userAgent:
           'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
+        proxy: this.proxy,
       });
 
       const page = context.pages()[0] || (await context.newPage());

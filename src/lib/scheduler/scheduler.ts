@@ -1,13 +1,29 @@
 import cron from 'node-cron';
-import { scheduleRepo, templatesRepo, groupsRepo, publicationsRepo } from '../db/repositories';
+import { scheduleRepo, templatesRepo, groupsRepo, publicationsRepo, accountsRepo } from '../db/repositories';
 import { renderTemplate, selectTemplateAndGroup } from '../templates/engine';
 import { PublisherManager } from '../publishers';
-import { getConfig } from '../config';
+import { getConfig, getAccountUserDataDir } from '../config';
 import type { ScheduleRule } from '../types';
 
 type CronTask = ReturnType<typeof cron.schedule>;
 
 const activeTasks = new Map<string, CronTask>();
+
+/**
+ * One PublisherManager per account — each is bound to that account's own
+ * browser session and proxy, so accounts never share a browser context.
+ */
+function buildPublishersByAccount(headless?: boolean): Map<string, PublisherManager> {
+  const publishers = new Map<string, PublisherManager>();
+  for (const account of accountsRepo.getActive()) {
+    publishers.set(account.id, new PublisherManager({
+      playwrightUserDataDir: getAccountUserDataDir(account.id),
+      playwrightHeadless: headless,
+      proxy: account.proxy,
+    }));
+  }
+  return publishers;
+}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -25,16 +41,23 @@ function randomJitterMs(minMinutes: number, maxMinutes: number): number {
 }
 
 /**
- * Starts all active schedule rules as cron jobs.
+ * Starts all active schedule rules as cron jobs, one PublisherManager per
+ * account so each rule publishes through its own account's session/proxy.
  */
-export function startScheduler(publisher: PublisherManager) {
+export function startScheduler(headless?: boolean) {
+  const publishers = buildPublishersByAccount(headless);
   const rules = scheduleRepo.getActive();
 
   for (const rule of rules) {
+    const publisher = publishers.get(rule.accountId);
+    if (!publisher) {
+      console.log(`[Scheduler] Rule "${rule.name}" skipped: account ${rule.accountId} is not active`);
+      continue;
+    }
     startRule(rule, publisher);
   }
 
-  console.log(`[Scheduler] Started ${rules.length} schedule rules`);
+  console.log(`[Scheduler] Started ${rules.length} schedule rules across ${publishers.size} accounts`);
 }
 
 /**
@@ -108,21 +131,34 @@ async function executeRule(
     await sleep(jitterMs);
   }
 
-  // Account-wide daily cap, independent of per-group limits
-  const totalToday = publicationsRepo.countTodayTotal();
+  // Per-account daily cap, independent of per-group limits
+  const totalToday = publicationsRepo.countTodayTotal(rule.accountId);
   if (totalToday >= behavior.maxPostsPerDayTotal) {
-    console.log(`[Scheduler] Límite diario total de la cuenta alcanzado (${totalToday}/${behavior.maxPostsPerDayTotal}), se omite`);
+    console.log(`[Scheduler] Límite diario de la cuenta alcanzado (${totalToday}/${behavior.maxPostsPerDayTotal}), se omite`);
     return;
   }
 
-  // Minimum spacing between ANY two posts across all groups — prevents
+  // Minimum spacing between ANY two posts of THIS account — prevents
   // bursts that read as scripted activity even if per-group cooldowns pass
-  const lastAny = publicationsRepo.getLastSuccessfulPublishedAt();
-  if (lastAny) {
-    const elapsedMs = Date.now() - new Date(lastAny).getTime();
+  const lastForAccount = publicationsRepo.getLastSuccessfulPublishedAt(rule.accountId);
+  if (lastForAccount) {
+    const elapsedMs = Date.now() - new Date(lastForAccount).getTime();
     const minGapMs = behavior.globalMinGapMinutes * 60 * 1000;
     if (elapsedMs < minGapMs) {
-      console.log(`[Scheduler] Espaciado global mínimo no cumplido (${Math.round(elapsedMs / 60000)}/${behavior.globalMinGapMinutes} min), se omite`);
+      console.log(`[Scheduler] Espaciado mínimo de la cuenta no cumplido (${Math.round(elapsedMs / 60000)}/${behavior.globalMinGapMinutes} min), se omite`);
+      return;
+    }
+  }
+
+  // Minimum spacing between posts of DIFFERENT accounts — a synchronized
+  // burst across accounts run from the same machine is itself a pattern,
+  // even with each account on its own proxy
+  const lastAnyAccount = publicationsRepo.getLastSuccessfulPublishedAtAny();
+  if (lastAnyAccount) {
+    const elapsedMs = Date.now() - new Date(lastAnyAccount).getTime();
+    const crossGapMs = behavior.crossAccountMinGapMinutes * 60 * 1000;
+    if (elapsedMs < crossGapMs) {
+      console.log(`[Scheduler] Espaciado entre cuentas no cumplido (${Math.round(elapsedMs / 60000)}/${behavior.crossAccountMinGapMinutes} min), se omite`);
       return;
     }
   }
@@ -167,6 +203,7 @@ async function executeRule(
 
   // Create publication record
   const publication = publicationsRepo.create({
+    accountId: rule.accountId,
     groupId: group.id,
     templateId: template.id,
     content: rendered.text,

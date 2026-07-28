@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { FacebookGroup } from '@/lib/types';
+import { useAccount } from '../account-context';
 
 const MEMBERSHIP_LABELS: Record<string, { label: string; className: string }> = {
   member: { label: 'Miembro', className: 'bg-green-500/20 text-green-400' },
@@ -12,6 +13,7 @@ const MEMBERSHIP_LABELS: Record<string, { label: string; className: string }> = 
 };
 
 export default function GroupsPage() {
+  const { accountId } = useAccount();
   const [groups, setGroups] = useState<FacebookGroup[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -26,11 +28,12 @@ export default function GroupsPage() {
   });
 
   useEffect(() => {
+    resetForm();
     fetchGroups();
-  }, []);
+  }, [accountId]);
 
   async function fetchGroups() {
-    const res = await fetch('/api/groups');
+    const res = await fetch(`/api/groups?accountId=${accountId}`);
     setGroups(await res.json());
   }
 
@@ -46,7 +49,7 @@ export default function GroupsPage() {
       await fetch('/api/groups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, accountId }),
       });
     }
     resetForm();

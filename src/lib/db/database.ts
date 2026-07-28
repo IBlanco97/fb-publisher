@@ -22,6 +22,17 @@ export function getDb(): Database.Database {
 
 function initSchema(db: Database.Database) {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS accounts (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      proxy_server TEXT,
+      proxy_username TEXT,
+      proxy_password TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS groups (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -86,6 +97,43 @@ function initSchema(db: Database.Database) {
 
   migrateGroupsMembershipColumns(db);
   migrateScheduleRulesJitterColumn(db);
+  migrateAccountScoping(db);
+}
+
+/**
+ * Introduces multi-account support on a database created before it existed.
+ * Backfills every existing row onto a synthetic `default` account so
+ * installs upgrading in place don't lose data or need manual migration.
+ */
+function migrateAccountScoping(db: Database.Database) {
+  const existing = db.prepare(`SELECT id FROM accounts WHERE id = 'default'`).get();
+  if (!existing) {
+    db.prepare(`
+      INSERT INTO accounts (id, name) VALUES ('default', 'Cuenta principal')
+    `).run();
+  }
+
+  addAccountIdColumn(db, 'groups');
+  addAccountIdColumn(db, 'templates');
+  addAccountIdColumn(db, 'schedule_rules');
+  addAccountIdColumn(db, 'publications');
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_groups_account ON groups(account_id);
+    CREATE INDEX IF NOT EXISTS idx_templates_account ON templates(account_id);
+    CREATE INDEX IF NOT EXISTS idx_schedule_rules_account ON schedule_rules(account_id);
+    CREATE INDEX IF NOT EXISTS idx_publications_account ON publications(account_id);
+  `);
+}
+
+function addAccountIdColumn(db: Database.Database, table: string) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!columns.some((c) => c.name === 'account_id')) {
+    // SQLite disallows a REFERENCES clause on ADD COLUMN when paired with a
+    // non-NULL default, so this stays an app-level reference (same as the
+    // existing group_id/template_id columns added via ALTER elsewhere).
+    db.exec(`ALTER TABLE ${table} ADD COLUMN account_id TEXT NOT NULL DEFAULT 'default'`);
+  }
 }
 
 /**
