@@ -13,6 +13,8 @@ export default function SettingsPage() {
   const [groups, setGroups] = useState<any[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [schedulerRunning, setSchedulerRunning] = useState<boolean | null>(null);
+  const [togglingScheduler, setTogglingScheduler] = useState(false);
   const [form, setForm] = useState({
     name: '',
     groupIds: [] as string[],
@@ -28,6 +30,33 @@ export default function SettingsPage() {
       setForm((f) => ({ ...f, timezone: savedTimezone }));
     }
   }, []);
+
+  useEffect(() => {
+    fetchSchedulerStatus();
+    const interval = setInterval(fetchSchedulerStatus, 4000);
+    return () => clearInterval(interval);
+  }, []);
+
+  async function fetchSchedulerStatus() {
+    const res = await fetch('/api/scheduler/control');
+    const data = await res.json();
+    setSchedulerRunning(data.running);
+  }
+
+  async function toggleScheduler() {
+    setTogglingScheduler(true);
+    try {
+      const res = await fetch('/api/scheduler/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: schedulerRunning ? 'stop' : 'start' }),
+      });
+      const data = await res.json();
+      setSchedulerRunning(data.running);
+    } finally {
+      setTogglingScheduler(false);
+    }
+  }
 
   useEffect(() => {
     setShowForm(false);
@@ -99,17 +128,33 @@ export default function SettingsPage() {
         </button>
       </div>
 
-      <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 mb-6 text-sm text-amber-200">
-        <p className="font-medium mb-1">⚠️ Las reglas de aquí no se ejecutan solas</p>
-        <p className="text-amber-200/80">
-          Este dashboard solo crea y edita reglas — para que se publiquen automáticamente necesitás
-          dejar corriendo, en una terminal aparte, el proceso del scheduler:
-        </p>
-        <code className="block bg-gray-900 rounded px-3 py-2 mt-2 font-mono text-xs">npm run cli -- schedule start</code>
-        <p className="text-amber-200/80 mt-2">
-          Ese comando queda bloqueado ejecutándose (es el que dispara las publicaciones según el cron
-          de cada regla) — si cerrás esa terminal, las reglas activas dejan de publicarse aunque sigan
-          marcadas como &quot;Activo&quot; en la lista de abajo.
+      <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 mb-6">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="font-medium text-amber-200 flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${schedulerRunning ? 'bg-green-500' : 'bg-gray-600'}`} />
+              Scheduler: {schedulerRunning === null ? 'consultando…' : schedulerRunning ? 'corriendo' : 'detenido'}
+            </p>
+            <p className="text-sm text-amber-200/80 mt-1">
+              Las reglas de aquí no publican nada por sí solas — hace falta el scheduler encendido.
+              Aplica a todas las cuentas con reglas activas, no solo a la cuenta seleccionada.
+            </p>
+          </div>
+          <button
+            onClick={toggleScheduler}
+            disabled={schedulerRunning === null || togglingScheduler}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
+              schedulerRunning ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
+            }`}
+          >
+            {togglingScheduler ? 'Aplicando…' : schedulerRunning ? 'Apagar scheduler' : 'Encender scheduler'}
+          </button>
+        </div>
+        <p className="text-xs text-amber-200/60 mt-3">
+          Equivalente a <code className="bg-gray-900 rounded px-1.5 py-0.5 font-mono">npm run cli -- schedule start</code> por
+          CLI — cualquiera de los dos métodos refleja el mismo estado. Confiable corriendo en producción
+          (<code className="bg-gray-900 rounded px-1.5 py-0.5 font-mono">npm start</code>); en <code className="bg-gray-900 rounded px-1.5 py-0.5 font-mono">npm run dev</code> puede
+          reiniciarse si se edita el código del servidor mientras está encendido.
         </p>
       </div>
 

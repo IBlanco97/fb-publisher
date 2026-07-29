@@ -8,12 +8,25 @@ export default function AccountsPage() {
   const { accounts, refreshAccounts, loading } = useAccount();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [loggingInId, setLoggingInId] = useState<string | null>(null);
+  const [loginNoticeId, setLoginNoticeId] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: '',
     proxyServer: '',
     proxyUsername: '',
     proxyPassword: '',
   });
+
+  async function startLogin(account: FacebookAccount) {
+    setLoggingInId(account.id);
+    setLoginNoticeId(null);
+    try {
+      await fetch(`/api/accounts/${account.id}/login`, { method: 'POST' });
+      setLoginNoticeId(account.id);
+    } finally {
+      setTimeout(() => setLoggingInId(null), 3000);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -158,22 +171,37 @@ export default function AccountsPage() {
                     ? `Proxy: ${account.proxy.server}${account.proxy.username ? ` (${account.proxy.username} / ••••••)` : ''}`
                     : 'Sin proxy — usa la IP de esta máquina'}
                 </p>
+                {loginNoticeId === account.id && (
+                  <p className="text-xs text-blue-400 mt-1">
+                    Se abrió un navegador en esta máquina — iniciá sesión ahí y cerralo cuando termines.
+                  </p>
+                )}
               </div>
-              <div className="flex items-center gap-2 ml-4">
-                <button
-                  onClick={() => toggleActive(account)}
-                  className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-                    account.isActive ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
-                  }`}
-                >
-                  {account.isActive ? 'Activa' : 'Inactiva'}
-                </button>
-                <button onClick={() => startEdit(account)} className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs transition-colors">
-                  Editar
-                </button>
-                <button onClick={() => handleDelete(account.id)} className="px-3 py-1 bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded text-xs transition-colors">
-                  Eliminar
-                </button>
+              <div className="flex flex-col items-end gap-1 ml-4">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => startLogin(account)}
+                    disabled={loggingInId === account.id}
+                    className="px-3 py-1 bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 disabled:opacity-50 rounded text-xs transition-colors"
+                  >
+                    {loggingInId === account.id ? 'Abriendo…' : 'Iniciar sesión'}
+                  </button>
+                  <button
+                    onClick={() => toggleActive(account)}
+                    className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                      account.isActive ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                    }`}
+                  >
+                    {account.isActive ? 'Activa' : 'Inactiva'}
+                  </button>
+                  <button onClick={() => startEdit(account)} className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs transition-colors">
+                    Editar
+                  </button>
+                  <button onClick={() => handleDelete(account.id)} className="px-3 py-1 bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded text-xs transition-colors">
+                    Eliminar
+                  </button>
+                </div>
+                <p className="text-[11px] text-gray-600">Se abre en esta máquina, no en la tuya si mirás el dashboard desde otra PC.</p>
               </div>
             </div>
           ))

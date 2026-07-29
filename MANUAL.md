@@ -130,7 +130,9 @@ npm run cli -- publish <groupId> <templateId>
 
 ## 3. Dashboard Web
 
-El dashboard web tiene 5 secciones accesibles desde el menú lateral:
+El dashboard web tiene 6 secciones accesibles desde el menú lateral (Overview, Cuentas, Grupos, Plantillas, Publicaciones, Configuración).
+
+> **Sin autenticación propia.** El dashboard no tiene login — cualquiera con acceso a la URL puede crear/eliminar grupos, cuentas, abrir un navegador de login o encender el scheduler. Correcto para uso local o en red confiable; si esto se expone a internet, hace falta agregar autenticación antes.
 
 ### Overview (Página principal)
 
@@ -375,13 +377,12 @@ El índice avanza siempre, incluso si la publicación falla, para evitar reinten
 
 El scheduler permite configurar publicaciones automáticas usando expresiones cron.
 
-> **⚠️ Crear una regla aquí no la ejecuta.** El dashboard solo guarda la configuración de la regla (grupos, plantillas, cron, jitter). Para que efectivamente se publique sola, hace falta dejar corriendo en una terminal aparte:
+> **⚠️ Crear una regla aquí no la ejecuta.** El dashboard solo guarda la configuración de la regla (grupos, plantillas, cron, jitter). Para que efectivamente se publique sola hace falta encender el scheduler, con cualquiera de estas dos formas equivalentes:
 >
-> ```bash
-> npm run cli -- schedule start
-> ```
+> - **Botón en el dashboard**: en Configuración, botón "Encender scheduler" (junto al punto de estado ● Corriendo / ○ Detenido). Aplica a todas las cuentas con reglas activas, no solo a la seleccionada. Confiable corriendo `npm run build && npm start` (producción); en `npm run dev` puede reiniciarse si se edita el código del servidor mientras está encendido.
+> - **Terminal aparte**: `npm run cli -- schedule start` — ese proceso queda bloqueado ejecutándose. Los dos métodos comparten el mismo estado (arrancar por uno se refleja en el otro).
 >
-> Ese proceso queda bloqueado ejecutándose — es el que revisa el cron de cada regla y dispara las publicaciones. Si cerrás esa terminal, las reglas siguen apareciendo como "Activo" en el dashboard pero no publican nada. La página de Configuración muestra este mismo aviso.
+> Si apagás el scheduler (o cerrás la terminal que lo tenía corriendo), las reglas siguen apareciendo como "Activo" en el dashboard pero no publican nada.
 
 ### Crear una regla de programación
 
@@ -666,11 +667,15 @@ El proxy es opcional al crear la cuenta — sin él, esa cuenta sale a internet 
 
 ### Login por cuenta
 
+Desde el dashboard: en **Cuentas**, botón **"Iniciar sesión"** en la tarjeta de la cuenta. Por CLI, equivalente:
+
 ```bash
 npm run cli -- login --account <id>
 ```
 
-Igual que el login de una sola cuenta: abre un navegador visible (ya usando el proxy asignado), inicias sesión manualmente, y la sesión queda guardada en `data/browser-sessions/<id>/` — aislada de las demás cuentas.
+Cualquiera de las dos formas abre un navegador visible (ya usando el proxy asignado), inicias sesión manualmente, y la sesión queda guardada en `data/browser-sessions/<id>/` — aislada de las demás cuentas.
+
+> **⚠️ El navegador se abre en la máquina donde corre el servidor Next.js, no en la tuya.** Si estás mirando el dashboard desde otra computadora (por ejemplo, la app corre en un servidor y vos la abrís desde tu laptop), el botón "Iniciar sesión" abre Chromium en el servidor — no vas a verlo. En ese caso hay que usar el CLI directamente en la máquina donde corre la app (o acceso remoto a su escritorio). El botón solo tiene sentido para uso local, con la app y el navegador en la misma máquina que estás mirando.
 
 ### Operar una cuenta específica
 

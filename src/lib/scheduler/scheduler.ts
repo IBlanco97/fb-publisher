@@ -8,6 +8,11 @@ import type { ScheduleRule } from '../types';
 type CronTask = ReturnType<typeof cron.schedule>;
 
 const activeTasks = new Map<string, CronTask>();
+let running = false;
+
+export function isSchedulerRunning(): boolean {
+  return running;
+}
 
 /**
  * One PublisherManager per account — each is bound to that account's own
@@ -57,6 +62,7 @@ export function startScheduler(headless?: boolean) {
     startRule(rule, publisher);
   }
 
+  running = true;
   console.log(`[Scheduler] Started ${rules.length} schedule rules across ${publishers.size} accounts`);
 }
 
@@ -93,10 +99,11 @@ export function stopRule(ruleId: string) {
  * Stops all schedule rules.
  */
 export function stopAll() {
-  for (const [id, task] of activeTasks) {
+  for (const [, task] of activeTasks) {
     task.stop();
   }
   activeTasks.clear();
+  running = false;
 }
 
 /**
