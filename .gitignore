@@ -44,3 +44,6 @@ next-env.d.ts
 # fb-publisher
 /data/
 .playwright-mcp/
+
+# notas de trabajo locales (no compartir)
+/notas/
