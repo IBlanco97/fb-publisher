@@ -6,10 +6,10 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { action } = await req.json();
+  const { action, dryRun } = await req.json();
 
   if (action === 'start') {
-    startScheduler();
+    startScheduler({ dryRun });
   } else if (action === 'stop') {
     stopAll();
   } else {

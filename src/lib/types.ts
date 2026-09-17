@@ -61,7 +61,7 @@ export interface Publication {
   templateId: string;
   content: string; // rendered content that was posted
   status: 'pending' | 'publishing' | 'success' | 'failed' | 'retry';
-  publishMethod: 'playwright';
+  publishMethod: 'playwright' | 'dry_run';
   error?: string;
   fbPostId?: string; // Facebook's post ID if successful
   scheduledAt?: string;
@@ -113,7 +113,7 @@ export interface BehaviorSettings {
 export interface PublishResult {
   success: boolean;
   postId?: string;
-  method: 'playwright';
+  method: 'playwright' | 'dry_run';
   error?: string;
   timestamp: string;
 }

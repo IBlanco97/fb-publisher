@@ -18,13 +18,14 @@ export function isSchedulerRunning(): boolean {
  * One PublisherManager per account — each is bound to that account's own
  * browser session and proxy, so accounts never share a browser context.
  */
-function buildPublishersByAccount(headless?: boolean): Map<string, PublisherManager> {
+function buildPublishersByAccount(headless?: boolean, dryRun?: boolean): Map<string, PublisherManager> {
   const publishers = new Map<string, PublisherManager>();
   for (const account of accountsRepo.getActive()) {
     publishers.set(account.id, new PublisherManager({
       playwrightUserDataDir: getAccountUserDataDir(account.id),
       playwrightHeadless: headless,
       proxy: account.proxy,
+      dryRun,
     }));
   }
   return publishers;
@@ -48,9 +49,12 @@ function randomJitterMs(minMinutes: number, maxMinutes: number): number {
 /**
  * Starts all active schedule rules as cron jobs, one PublisherManager per
  * account so each rule publishes through its own account's session/proxy.
+ * `dryRun: true` runs the exact same cron/jitter/rate-limit pipeline but
+ * never launches a browser or touches Facebook — every rule "publishes"
+ * through DryRunPublisher instead.
  */
-export function startScheduler(headless?: boolean) {
-  const publishers = buildPublishersByAccount(headless);
+export function startScheduler(opts: { headless?: boolean; dryRun?: boolean } = {}) {
+  const publishers = buildPublishersByAccount(opts.headless, opts.dryRun);
   const rules = scheduleRepo.getActive();
 
   for (const rule of rules) {

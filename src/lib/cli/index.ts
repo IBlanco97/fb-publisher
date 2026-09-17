@@ -45,13 +45,14 @@ function requireAccount(accountId: string) {
   return account!;
 }
 
-function createPublisher(accountId: string, headlessOverride?: boolean) {
+function createPublisher(accountId: string, headlessOverride?: boolean, dryRun?: boolean) {
   const config = getConfig();
   const account = requireAccount(accountId);
   return new PublisherManager({
     playwrightUserDataDir: getAccountUserDataDir(accountId),
     playwrightHeadless: headlessOverride ?? config.playwright.headless,
     proxy: account.proxy,
+    dryRun,
   });
 }
 
@@ -434,20 +435,22 @@ async function handleSchedule(args: string[]) {
     }
     case 'start': {
       const noHeadless = args.includes('--no-headless');
-      console.log('Iniciando scheduler (todas las cuentas activas)...');
-      startScheduler(noHeadless ? false : undefined);
+      const dryRun = args.includes('--dry-run');
+      console.log(`Iniciando scheduler (todas las cuentas activas)${dryRun ? ' [DRY RUN]' : ''}...`);
+      startScheduler({ headless: noHeadless ? false : undefined, dryRun });
       console.log('Scheduler activo. Presiona Ctrl+C para detener.');
       await new Promise(() => {});
       break;
     }
     case 'trigger': {
-      const rest = stripFlags(args.slice(1), ['--account']);
+      const dryRun = args.includes('--dry-run');
+      const rest = stripFlags(args.slice(1), ['--account']).filter((a) => a !== '--dry-run');
       const ruleId = rest[0];
-      if (!ruleId) { console.log('Uso: schedule trigger <ruleId>'); return; }
+      if (!ruleId) { console.log('Uso: schedule trigger <ruleId> [--dry-run]'); return; }
       const rule = scheduleRepo.getById(ruleId);
       if (!rule) { console.log('Regla no encontrada.'); return; }
-      console.log('Ejecutando regla...');
-      const publisher = createPublisher(rule.accountId);
+      console.log(`Ejecutando regla${dryRun ? ' [DRY RUN]' : ''}...`);
+      const publisher = createPublisher(rule.accountId, undefined, dryRun);
       await triggerRule(ruleId, publisher);
       break;
     }
