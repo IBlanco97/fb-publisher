@@ -68,6 +68,12 @@ export default function TemplatesPage() {
     setPreview(data.text);
   }
 
+  function handleRandomPreview(template: AdTemplate) {
+    const totalCombinations = template.variables.reduce((t, v) => t * Math.max(v.values.length, 1), 1);
+    const randomIndex = Math.floor(Math.random() * totalCombinations);
+    handlePreview(template, randomIndex);
+  }
+
   function addVariable() {
     setForm((f) => ({
       ...f,
@@ -266,6 +272,12 @@ export default function TemplatesPage() {
               >
                 Siguiente →
               </button>
+              <button
+                onClick={() => previewTemplate && handleRandomPreview(previewTemplate)}
+                className="px-2 py-1 bg-purple-500/20 text-purple-400 rounded text-xs"
+              >
+                🎲 Otro al azar
+              </button>
             </div>
           </div>
           <pre className="text-sm text-gray-300 whitespace-pre-wrap font-mono">{preview}</pre>
@@ -302,6 +314,13 @@ export default function TemplatesPage() {
                     className="px-3 py-1 bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 rounded text-xs transition-colors"
                   >
                     Preview
+                  </button>
+                  <button
+                    onClick={() => handleRandomPreview(template)}
+                    className="px-3 py-1 bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 rounded text-xs transition-colors"
+                    title="Genera un ejemplo al azar entre todas las combinaciones posibles"
+                  >
+                    🎲 Ejemplo al azar
                   </button>
                   <button onClick={() => startEdit(template)} className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs transition-colors">
                     Editar
