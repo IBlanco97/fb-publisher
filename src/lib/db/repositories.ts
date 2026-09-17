@@ -1,6 +1,6 @@
 import { v4 as uuid } from 'uuid';
 import { getDb } from './database';
-import type { FacebookAccount, FacebookGroup, AdTemplate, Publication, ScheduleRule } from '../types';
+import type { FacebookAccount, FacebookGroup, AdTemplate, Publication, ScheduleRule, BehaviorSettings } from '../types';
 
 // ─── Accounts ───
 
@@ -79,6 +79,26 @@ export const groupsRepo = {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, data.accountId, data.name, data.fbGroupId, data.url, data.category ?? null, data.isActive ? 1 : 0, data.maxPostsPerDay, data.cooldownMinutes);
     return { ...data, id, createdAt: now, updatedAt: now, membershipStatus: 'unknown' };
+  },
+
+  /** Bulk-inserts groups in a single transaction. Callers own dedup/validation. */
+  createMany(rows: Array<Omit<FacebookGroup, 'id' | 'createdAt' | 'updatedAt' | 'membershipStatus' | 'membershipCheckedAt'>>): FacebookGroup[] {
+    const db = getDb();
+    const insert = db.prepare(`
+      INSERT INTO groups (id, account_id, name, fb_group_id, url, category, is_active, max_posts_per_day, cooldown_minutes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const now = new Date().toISOString();
+    const created: FacebookGroup[] = [];
+    const insertAll = db.transaction((items: typeof rows) => {
+      for (const data of items) {
+        const id = uuid();
+        insert.run(id, data.accountId, data.name, data.fbGroupId, data.url, data.category ?? null, data.isActive ? 1 : 0, data.maxPostsPerDay, data.cooldownMinutes);
+        created.push({ ...data, id, createdAt: now, updatedAt: now, membershipStatus: 'unknown' });
+      }
+    });
+    insertAll(rows);
+    return created;
   },
 
   update(id: string, data: Partial<FacebookGroup>): void {
@@ -286,6 +306,38 @@ export const scheduleRepo = {
     getDb().prepare('DELETE FROM schedule_rules WHERE id = ?').run(id);
   },
 };
+
+// ─── Behavior settings (anti-detection knobs, dashboard-editable) ───
+
+export const settingsRepo = {
+  get(): BehaviorSettings {
+    const row = getDb().prepare('SELECT * FROM app_settings WHERE id = ?').get('global') as any;
+    return rowToBehaviorSettings(row);
+  },
+
+  update(data: Partial<BehaviorSettings>): BehaviorSettings {
+    const fields: string[] = [];
+    const values: any[] = [];
+    if (data.jitterMinMinutes !== undefined) { fields.push('jitter_min_minutes = ?'); values.push(data.jitterMinMinutes); }
+    if (data.jitterMaxMinutes !== undefined) { fields.push('jitter_max_minutes = ?'); values.push(data.jitterMaxMinutes); }
+    if (data.globalMinGapMinutes !== undefined) { fields.push('global_min_gap_minutes = ?'); values.push(data.globalMinGapMinutes); }
+    if (data.maxPostsPerDayTotal !== undefined) { fields.push('max_posts_per_day_total = ?'); values.push(data.maxPostsPerDayTotal); }
+    if (data.crossAccountMinGapMinutes !== undefined) { fields.push('cross_account_min_gap_minutes = ?'); values.push(data.crossAccountMinGapMinutes); }
+    fields.push("updated_at = datetime('now')");
+    getDb().prepare(`UPDATE app_settings SET ${fields.join(', ')} WHERE id = 'global'`).run(...values);
+    return this.get();
+  },
+};
+
+function rowToBehaviorSettings(row: any): BehaviorSettings {
+  return {
+    jitterMinMinutes: row.jitter_min_minutes,
+    jitterMaxMinutes: row.jitter_max_minutes,
+    globalMinGapMinutes: row.global_min_gap_minutes,
+    maxPostsPerDayTotal: row.max_posts_per_day_total,
+    crossAccountMinGapMinutes: row.cross_account_min_gap_minutes,
+  };
+}
 
 // ─── Row mappers ───
 

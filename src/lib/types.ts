@@ -96,13 +96,16 @@ export interface AppConfig {
     retryAttempts: number;
     retryDelayMs: number;
   };
-  behavior: {
-    jitterMinMinutes: number; // random delay applied after a cron tick fires, before publishing
-    jitterMaxMinutes: number;
-    globalMinGapMinutes: number; // minimum spacing between ANY two posts of the SAME account
-    maxPostsPerDayTotal: number; // per-account daily cap, independent of per-group limits
-    crossAccountMinGapMinutes: number; // minimum spacing between posts of DIFFERENT accounts
-  };
+  behavior: BehaviorSettings;
+}
+
+/** Anti-detection pacing knobs, editable from the dashboard (Configuración). */
+export interface BehaviorSettings {
+  jitterMinMinutes: number; // random delay applied after a cron tick fires, before publishing
+  jitterMaxMinutes: number;
+  globalMinGapMinutes: number; // minimum spacing between ANY two posts of the SAME account
+  maxPostsPerDayTotal: number; // per-account daily cap, independent of per-group limits
+  crossAccountMinGapMinutes: number; // minimum spacing between posts of DIFFERENT accounts
 }
 
 // ─── Publisher interface ───

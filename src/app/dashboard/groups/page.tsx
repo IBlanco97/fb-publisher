@@ -18,6 +18,11 @@ export default function GroupsPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [checkingId, setCheckingId] = useState<string | null>(null);
+  const [showImport, setShowImport] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importActivate, setImportActivate] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ createdCount: number; skippedCount: number; skipped: { line: number; reason: string }[] } | null>(null);
   const [form, setForm] = useState({
     name: '',
     fbGroupId: '',
@@ -107,6 +112,34 @@ export default function GroupsPage() {
     });
   }
 
+  function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setImportText(String(reader.result || ''));
+    reader.readAsText(file);
+    e.target.value = '';
+  }
+
+  async function handleImportSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!importText.trim()) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const res = await fetch('/api/groups/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: importText, accountId, isActive: importActivate }),
+      });
+      const result = await res.json();
+      setImportResult(result);
+      await fetchGroups();
+    } finally {
+      setImporting(false);
+    }
+  }
+
   function extractGroupId(url: string) {
     const match = url.match(/groups\/(\d+)/);
     if (match) {
@@ -120,13 +153,87 @@ export default function GroupsPage() {
     <div>
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold">Grupos de Facebook</h2>
-        <button
-          onClick={() => (showForm ? resetForm() : setShowForm(true))}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition-colors"
-        >
-          {showForm ? 'Cancelar' : '+ Agregar grupo'}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowImport((v) => !v)}
+            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition-colors"
+          >
+            {showImport ? 'Cancelar' : 'Importar catálogo'}
+          </button>
+          <button
+            onClick={() => (showForm ? resetForm() : setShowForm(true))}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition-colors"
+          >
+            {showForm ? 'Cancelar' : '+ Agregar grupo'}
+          </button>
+        </div>
       </div>
+
+      {/* Import panel */}
+      {showImport && (
+        <form onSubmit={handleImportSubmit} className="bg-gray-900 rounded-xl border border-gray-800 p-6 mb-6 space-y-4">
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Pega un CSV/TSV o carga un archivo</label>
+            <p className="text-xs text-gray-500 mb-2">
+              Columnas: nombre, URL (facebook.com/groups/...), categoría (opcional). Con o sin fila de encabezado.
+              Los grupos que ya existan en el catálogo se omiten automáticamente.
+            </p>
+            <input
+              type="file"
+              accept=".csv,.tsv,.txt"
+              onChange={handleImportFile}
+              className="block w-full text-sm text-gray-400 mb-2 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-gray-800 file:text-gray-300 file:text-xs hover:file:bg-gray-700"
+            />
+            <textarea
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              rows={8}
+              placeholder={'nombre,url,categoria\nCubanos en Berlín,https://www.facebook.com/groups/cubanosenberlin/,Alemania'}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-gray-400">
+            <input
+              type="checkbox"
+              checked={importActivate}
+              onChange={(e) => setImportActivate(e.target.checked)}
+              className="rounded border-gray-700 bg-gray-800"
+            />
+            Activar los grupos importados (por defecto quedan inactivos, solo catálogo)
+          </label>
+          <div className="flex gap-3">
+            <button
+              type="submit"
+              disabled={importing || !importText.trim()}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
+            >
+              {importing ? 'Importando…' : 'Importar'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowImport(false); setImportText(''); setImportResult(null); }}
+              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition-colors"
+            >
+              Cerrar
+            </button>
+          </div>
+          {importResult && (
+            <div className="text-sm bg-gray-800 rounded-lg p-3 space-y-1">
+              <p className="text-green-400">{importResult.createdCount} grupos importados.</p>
+              {importResult.skippedCount > 0 && (
+                <details>
+                  <summary className="text-yellow-400 cursor-pointer">{importResult.skippedCount} omitidos (ver detalle)</summary>
+                  <ul className="mt-1 text-xs text-gray-400 space-y-0.5 max-h-40 overflow-y-auto">
+                    {importResult.skipped.map((s, i) => (
+                      <li key={i}>{s.line >= 0 ? `Línea ${s.line}: ` : ''}{s.reason}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
+        </form>
+      )}
 
       {/* Form */}
       {showForm && (

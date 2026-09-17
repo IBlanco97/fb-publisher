@@ -93,11 +93,47 @@ function initSchema(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_publications_status ON publications(status);
     CREATE INDEX IF NOT EXISTS idx_publications_group ON publications(group_id);
     CREATE INDEX IF NOT EXISTS idx_publications_scheduled ON publications(scheduled_at);
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+      id TEXT PRIMARY KEY,
+      jitter_min_minutes INTEGER NOT NULL,
+      jitter_max_minutes INTEGER NOT NULL,
+      global_min_gap_minutes INTEGER NOT NULL,
+      max_posts_per_day_total INTEGER NOT NULL,
+      cross_account_min_gap_minutes INTEGER NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   migrateGroupsMembershipColumns(db);
   migrateScheduleRulesJitterColumn(db);
   migrateAccountScoping(db);
+  migrateBehaviorSettings(db);
+}
+
+/**
+ * Seeds the single app_settings row on first run, so the anti-detection
+ * knobs (jitter, gaps, daily cap) become dashboard-editable instead of
+ * .env-only. Seeds from whatever was in .env.local at the time of this
+ * upgrade, so installs that already tuned these values via the old env
+ * vars don't silently reset to the hardcoded defaults.
+ */
+function migrateBehaviorSettings(db: Database.Database) {
+  const existing = db.prepare(`SELECT id FROM app_settings WHERE id = 'global'`).get();
+  if (existing) return;
+
+  db.prepare(`
+    INSERT INTO app_settings (
+      id, jitter_min_minutes, jitter_max_minutes, global_min_gap_minutes,
+      max_posts_per_day_total, cross_account_min_gap_minutes
+    ) VALUES ('global', ?, ?, ?, ?, ?)
+  `).run(
+    parseInt(process.env.SCHEDULER_JITTER_MIN_MINUTES || '0', 10),
+    parseInt(process.env.SCHEDULER_JITTER_MAX_MINUTES || '20', 10),
+    parseInt(process.env.SCHEDULER_GLOBAL_MIN_GAP_MINUTES || '8', 10),
+    parseInt(process.env.SCHEDULER_MAX_POSTS_PER_DAY_TOTAL || '12', 10),
+    parseInt(process.env.SCHEDULER_CROSS_ACCOUNT_MIN_GAP_MINUTES || '3', 10),
+  );
 }
 
 /**

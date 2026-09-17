@@ -1,11 +1,49 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { ScheduleRule } from '@/lib/types';
+import type { ScheduleRule, BehaviorSettings } from '@/lib/types';
 import { useAccount } from '../account-context';
 
 const LAST_TIMEZONE_KEY = 'fb-publisher:last-timezone';
 const DEFAULT_TIMEZONE = 'America/Bogota';
+
+const BEHAVIOR_FIELDS: Array<{
+  key: keyof BehaviorSettings;
+  label: string;
+  help: string;
+  suffix?: string;
+}> = [
+  {
+    key: 'jitterMinMinutes',
+    label: 'Demora mínima antes de publicar',
+    help: 'Al llegar la hora programada, la cuenta no publica al instante: espera un tiempo al azar entre el mínimo y el máximo. Publicar siempre a la hora exacta es una señal típica de bot.',
+    suffix: 'min',
+  },
+  {
+    key: 'jitterMaxMinutes',
+    label: 'Demora máxima antes de publicar',
+    help: 'El otro extremo de esa espera aleatoria. Tiene que ser mayor o igual que la demora mínima.',
+    suffix: 'min',
+  },
+  {
+    key: 'globalMinGapMinutes',
+    label: 'Espaciado mínimo entre posts de una cuenta',
+    help: 'Por más grupos que tenga programados una misma cuenta, nunca va a publicar dos veces con menos de esta cantidad de minutos de diferencia entre sí.',
+    suffix: 'min',
+  },
+  {
+    key: 'maxPostsPerDayTotal',
+    label: 'Tope diario de publicaciones por cuenta',
+    help: 'Cuando una cuenta llega a esta cantidad de publicaciones exitosas en el día, el scheduler deja de publicar con ella hasta el día siguiente — sin importar cuántos grupos o reglas tenga.',
+    suffix: 'posts/día',
+  },
+  {
+    key: 'crossAccountMinGapMinutes',
+    label: 'Espaciado mínimo entre cuentas distintas',
+    help: 'Si hay varias cuentas de Facebook activas, esta es la distancia mínima en minutos entre una publicación de una cuenta y la siguiente de otra — para que no parezca que todas publican al mismo tiempo desde el mismo lugar.',
+    suffix: 'min',
+  },
+];
 
 export default function SettingsPage() {
   const { accountId } = useAccount();
@@ -15,6 +53,11 @@ export default function SettingsPage() {
   const [showForm, setShowForm] = useState(false);
   const [schedulerRunning, setSchedulerRunning] = useState<boolean | null>(null);
   const [togglingScheduler, setTogglingScheduler] = useState(false);
+  const [behavior, setBehavior] = useState<BehaviorSettings | null>(null);
+  const [behaviorDraft, setBehaviorDraft] = useState<Record<string, string>>({});
+  const [savingBehavior, setSavingBehavior] = useState(false);
+  const [behaviorError, setBehaviorError] = useState('');
+  const [behaviorSaved, setBehaviorSaved] = useState(false);
   const [form, setForm] = useState({
     name: '',
     groupIds: [] as string[],
@@ -36,6 +79,45 @@ export default function SettingsPage() {
     const interval = setInterval(fetchSchedulerStatus, 4000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    fetchBehaviorSettings();
+  }, []);
+
+  async function fetchBehaviorSettings() {
+    const res = await fetch('/api/settings');
+    const data: BehaviorSettings = await res.json();
+    setBehavior(data);
+    setBehaviorDraft(
+      Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]))
+    );
+  }
+
+  async function saveBehaviorSettings(e: React.FormEvent) {
+    e.preventDefault();
+    setBehaviorError('');
+    setSavingBehavior(true);
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(behaviorDraft),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setBehaviorError(data.error || 'No se pudo guardar');
+        return;
+      }
+      setBehavior(data);
+      setBehaviorDraft(
+        Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]))
+      );
+      setBehaviorSaved(true);
+      setTimeout(() => setBehaviorSaved(false), 2500);
+    } finally {
+      setSavingBehavior(false);
+    }
+  }
 
   async function fetchSchedulerStatus() {
     const res = await fetch('/api/scheduler/control');
@@ -156,6 +238,57 @@ export default function SettingsPage() {
           (<code className="bg-gray-900 rounded px-1.5 py-0.5 font-mono">npm start</code>); en <code className="bg-gray-900 rounded px-1.5 py-0.5 font-mono">npm run dev</code> puede
           reiniciarse si se edita el código del servidor mientras está encendido.
         </p>
+      </div>
+
+      {/* Anti-detection pacing knobs — was .env-only, now dashboard-editable */}
+      <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 mb-6">
+        <h3 className="font-medium mb-1">Ritmo de publicación y anti-detección</h3>
+        <p className="text-sm text-gray-500 mb-4">
+          Controla qué tan agresivo o cauteloso publica el scheduler. Aplica a todas las cuentas
+          y reglas — no hace falta reiniciar la aplicación para que los cambios tomen efecto.
+        </p>
+
+        {!behavior ? (
+          <p className="text-sm text-gray-500">Cargando…</p>
+        ) : (
+          <form onSubmit={saveBehaviorSettings} className="space-y-5">
+            <div className="grid md:grid-cols-2 gap-5">
+              {BEHAVIOR_FIELDS.map((field) => (
+                <div key={field.key}>
+                  <label className="block text-sm text-gray-300 mb-1">{field.label}</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={0}
+                      value={behaviorDraft[field.key] ?? ''}
+                      onChange={(e) =>
+                        setBehaviorDraft((d) => ({ ...d, [field.key]: e.target.value }))
+                      }
+                      className="w-28 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-blue-500"
+                    />
+                    {field.suffix && <span className="text-xs text-gray-500">{field.suffix}</span>}
+                  </div>
+                  <p className="text-xs text-gray-600 mt-1">{field.help}</p>
+                </div>
+              ))}
+            </div>
+
+            {behaviorError && (
+              <p className="text-sm text-red-400">{behaviorError}</p>
+            )}
+
+            <div className="flex items-center gap-3">
+              <button
+                type="submit"
+                disabled={savingBehavior}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
+              >
+                {savingBehavior ? 'Guardando…' : 'Guardar cambios'}
+              </button>
+              {behaviorSaved && <span className="text-sm text-green-400">Guardado ✓</span>}
+            </div>
+          </form>
+        )}
       </div>
 
       {/* Create schedule form */}
