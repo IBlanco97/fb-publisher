@@ -50,7 +50,6 @@ FB_PASSWORD=tu_password_facebook
 
 # ─── Playwright ───
 PLAYWRIGHT_HEADLESS=true
-PLAYWRIGHT_USER_DATA_DIR=./data/browser-session
 
 # ─── Publicación ───
 RETRY_ATTEMPTS=2
@@ -62,7 +61,6 @@ RETRY_DELAY_MS=5000
 | `FB_EMAIL` | Email de la cuenta de Facebook (opcional si haces login manual) |
 | `FB_PASSWORD` | Contraseña de Facebook (opcional si haces login manual) |
 | `PLAYWRIGHT_HEADLESS` | `true` = navegador invisible, `false` = visible |
-| `PLAYWRIGHT_USER_DATA_DIR` | Ruta donde se guarda la sesión del navegador |
 | `RETRY_ATTEMPTS` | Cuántas veces reintentar una publicación fallida |
 | `RETRY_DELAY_MS` | Milisegundos de espera entre reintentos |
 
@@ -393,7 +391,7 @@ El scheduler permite configurar publicaciones automáticas usando expresiones cr
    - **Grupos**: Seleccionar en qué grupos publicar.
    - **Plantillas**: Seleccionar qué plantillas usar.
    - **Frecuencia**: Elegir un preset o escribir una expresión cron personalizada.
-   - **Aplicar demora aleatoria (jitter)**: casilla activada por defecto. Con ella activa, la regla espera un tiempo aleatorio (`SCHEDULER_JITTER_MIN/MAX_MINUTES`, sección 11) después de cada disparo de cron antes de publicar, para no parecer bot. Desactivarla solo para pruebas donde interesa que publique apenas llega la hora exacta.
+   - **Aplicar demora aleatoria (jitter)**: casilla activada por defecto. Con ella activa, la regla espera un tiempo aleatorio (el rango se ajusta en Configuración → "Ritmo de publicación y anti-detección", sección 11) después de cada disparo de cron antes de publicar, para no parecer bot. Desactivarla solo para pruebas donde interesa que publique apenas llega la hora exacta.
    - **Zona horaria**: Seleccionar la zona horaria. El dashboard recuerda la última zona horaria usada (guardada en el navegador) y la pre-selecciona la próxima vez que creás una regla.
 4. Clic en **"Crear regla de programación"**.
 
@@ -531,14 +529,10 @@ Se puede filtrar por estado:
 | `FB_EMAIL` | string | `""` | Email para login automático (opcional) |
 | `FB_PASSWORD` | string | `""` | Password para login automático (opcional) |
 | `PLAYWRIGHT_HEADLESS` | boolean | `true` | Navegador invisible |
-| `PLAYWRIGHT_USER_DATA_DIR` | string | `./data/browser-session` | Ruta de sesión del navegador de la cuenta `default` (las demás cuentas usan `data/browser-sessions/{id}/` automáticamente) |
 | `RETRY_ATTEMPTS` | number | `2` | Intentos de reintento |
 | `RETRY_DELAY_MS` | number | `5000` | Milisegundos entre reintentos |
-| `SCHEDULER_JITTER_MIN_MINUTES` | number | `0` | Espera aleatoria mínima (min) tras cada disparo de cron antes de publicar |
-| `SCHEDULER_JITTER_MAX_MINUTES` | number | `20` | Espera aleatoria máxima (min) tras cada disparo de cron antes de publicar |
-| `SCHEDULER_GLOBAL_MIN_GAP_MINUTES` | number | `8` | Espaciado mínimo entre posts de la MISMA cuenta, sin importar el grupo |
-| `SCHEDULER_MAX_POSTS_PER_DAY_TOTAL` | number | `12` | Tope diario de publicaciones exitosas POR cuenta |
-| `SCHEDULER_CROSS_ACCOUNT_MIN_GAP_MINUTES` | number | `3` | Espaciado mínimo entre posts de cuentas DISTINTAS (ver [sección 13](#13-múltiples-cuentas-de-facebook)) |
+
+> **Los 5 parámetros de ritmo/anti-detección (jitter, espaciados, tope diario) ya no son solo de `.env.local`.** `SCHEDULER_JITTER_MIN_MINUTES`, `SCHEDULER_JITTER_MAX_MINUTES`, `SCHEDULER_GLOBAL_MIN_GAP_MINUTES`, `SCHEDULER_MAX_POSTS_PER_DAY_TOTAL` y `SCHEDULER_CROSS_ACCOUNT_MIN_GAP_MINUTES` solo se usan para sembrar el valor inicial la primera vez que arranca la aplicación. De ahí en adelante viven en la base de datos y se editan desde el dashboard, en **Configuración → "Ritmo de publicación y anti-detección"** — sin tocar archivos ni reiniciar el servidor. Ver también la [sección 12](#12-evitar-detección-como-actividad-sospechosa).
 
 ### Base de datos
 
@@ -625,9 +619,9 @@ npm run dev
 
 El scheduler ya aplica automáticamente (ver variables en la sección 11):
 
-- **Jitter aleatorio**: cada publicación programada espera un tiempo aleatorio (`SCHEDULER_JITTER_MIN/MAX_MINUTES`) antes de ejecutarse, para no publicar siempre a la hora exacta del cron.
-- **Espaciado global mínimo** (`SCHEDULER_GLOBAL_MIN_GAP_MINUTES`): nunca publica dos posts (en cualquier grupo) más seguido que este intervalo, evitando ráfagas.
-- **Tope diario total de la cuenta** (`SCHEDULER_MAX_POSTS_PER_DAY_TOTAL`), independiente del límite por grupo.
+- **Jitter aleatorio**: cada publicación programada espera un tiempo aleatorio (rango ajustable desde el dashboard, sección 11) antes de ejecutarse, para no publicar siempre a la hora exacta del cron.
+- **Espaciado global mínimo**: nunca publica dos posts (en cualquier grupo) más seguido que este intervalo, evitando ráfagas.
+- **Tope diario total de la cuenta**, independiente del límite por grupo.
 - **Tipeo con velocidad variable** y pausas ocasionales, en vez de tipeo a ritmo constante.
 - **Tiempo de lectura simulado**: espera unos segundos tras cargar la página del grupo antes de interactuar, como haría una persona.
 
@@ -695,7 +689,7 @@ Sin `--account`, todos estos comandos operan sobre la cuenta `default`.
 npm run cli -- schedule start
 ```
 
-Un solo `schedule start` levanta las reglas de **todas** las cuentas activas a la vez, cada una publicando con su propia sesión y proxy. Además de los límites por cuenta (tope diario, espaciado mínimo — sección 11), el scheduler aplica un espaciado mínimo *entre cuentas distintas* (`SCHEDULER_CROSS_ACCOUNT_MIN_GAP_MINUTES`, default 3 minutos) para que dos cuentas no publiquen en el mismo instante, aunque cada una tenga su propio proxy.
+Un solo `schedule start` levanta las reglas de **todas** las cuentas activas a la vez, cada una publicando con su propia sesión y proxy. Además de los límites por cuenta (tope diario, espaciado mínimo — sección 11), el scheduler aplica un espaciado mínimo *entre cuentas distintas* (ajustable desde el dashboard, default 3 minutos) para que dos cuentas no publiquen en el mismo instante, aunque cada una tenga su propio proxy.
 
 ### Lo que no resuelve el código
 

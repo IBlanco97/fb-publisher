@@ -188,6 +188,11 @@ async function executeRule(
     return;
   }
 
+  if (!group.isActive) {
+    console.log(`[Scheduler] Group "${group.name}" is inactive, skipping`);
+    return;
+  }
+
   // Check cooldown
   if (group.lastPublishedAt) {
     const lastPublished = new Date(group.lastPublishedAt).getTime();

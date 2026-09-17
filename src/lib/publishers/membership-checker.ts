@@ -21,12 +21,34 @@ export async function checkGroupMembership(
     });
 
     try {
+      // A public group's preview page shows a "Join group" prompt to anonymous
+      // visitors too, so that text alone can't tell "not a member" apart from
+      // "not logged in". Check for Facebook's own auth cookie first.
+      const cookies = await context.cookies('https://www.facebook.com');
+      if (!cookies.some((c) => c.name === 'c_user')) return 'error';
+
       const page = context.pages()[0] || (await context.newPage());
       await page.goto(`https://m.facebook.com/groups/${fbGroupId}`, {
         waitUntil: 'domcontentloaded',
         timeout: 20000,
       });
-      await page.waitForTimeout(2500);
+
+      // The logged-in group page renders client-side and is empty for the
+      // first ~2-3s — a fixed short wait can read it mid-render (empty body
+      // reads as "no Join button" => false "member"). Poll for real content
+      // instead of trusting a fixed delay.
+      try {
+        await page.waitForFunction(() => document.body.innerText.trim().length > 200, {
+          timeout: 8000,
+        });
+      } catch {
+        return 'error'; // never rendered real content within the budget
+      }
+
+      // The SPA occasionally bounces back to the home feed a few seconds
+      // after landing on the group page; reading membership off the wrong
+      // page would be worse than reporting "couldn't tell".
+      if (!page.url().includes(`/groups/${fbGroupId}`)) return 'error';
 
       const hasJoinButton = await page.evaluate(() =>
         Array.from(document.querySelectorAll('span, div')).some(
