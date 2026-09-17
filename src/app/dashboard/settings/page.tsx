@@ -1,11 +1,34 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ScheduleRule } from '@/lib/types';
+import type { SchedulerEvent, SchedulerStatus } from '@/lib/scheduler/scheduler';
 import { useAccount } from '../account-context';
 
 const LAST_TIMEZONE_KEY = 'fb-publisher:last-timezone';
+const SHOW_BROWSER_KEY = 'fb-publisher:show-browser';
 const DEFAULT_TIMEZONE = 'America/Bogota';
+
+function formatTime(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function formatCountdown(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const ms = new Date(iso).getTime() - Date.now();
+  if (ms <= 0) return 'ahora';
+  const minutes = Math.floor(ms / 60000);
+  const seconds = Math.floor((ms % 60000) / 1000);
+  return minutes > 0 ? `en ${minutes}m ${seconds}s` : `en ${seconds}s`;
+}
+
+const EVENT_COLORS: Record<SchedulerEvent['level'], string> = {
+  info: 'text-gray-300',
+  warn: 'text-amber-400',
+  error: 'text-red-400',
+  success: 'text-green-400',
+};
 
 export default function SettingsPage() {
   const { accountId } = useAccount();
@@ -13,8 +36,13 @@ export default function SettingsPage() {
   const [groups, setGroups] = useState<any[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
-  const [schedulerRunning, setSchedulerRunning] = useState<boolean | null>(null);
+  const [status, setStatus] = useState<SchedulerStatus | null>(null);
+  const [events, setEvents] = useState<SchedulerEvent[]>([]);
   const [togglingScheduler, setTogglingScheduler] = useState(false);
+  const [showBrowser, setShowBrowser] = useState(false);
+  const [runningRuleId, setRunningRuleId] = useState<string | null>(null);
+  // Value unused: the state update alone re-renders the countdowns each second.
+  const [, setTick] = useState(0);
   const [form, setForm] = useState({
     name: '',
     groupIds: [] as string[],
@@ -32,15 +60,47 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
+    const saved = localStorage.getItem(SHOW_BROWSER_KEY);
+    if (saved !== null) setShowBrowser(saved === 'true');
+  }, []);
+
+  // Poll status + new log lines. 2s keeps a running publish feeling live
+  // without hammering the server; `since` means we only ship new events.
+  useEffect(() => {
     fetchSchedulerStatus();
-    const interval = setInterval(fetchSchedulerStatus, 4000);
+    const interval = setInterval(fetchSchedulerStatus, 2000);
     return () => clearInterval(interval);
   }, []);
 
+  // Drives the "próxima ejecución en Xm Ys" countdowns.
+  useEffect(() => {
+    const interval = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const lastEventId = useRef(0);
+
+  function appendEvents(incoming: SchedulerEvent[] | undefined, replace = false) {
+    if (!incoming) return;
+    if (replace) {
+      lastEventId.current = incoming.length ? incoming[incoming.length - 1].id : 0;
+      setEvents(incoming);
+      return;
+    }
+    if (incoming.length === 0) return;
+    lastEventId.current = incoming[incoming.length - 1].id;
+    setEvents((prev) => [...prev, ...incoming].slice(-300));
+  }
+
   async function fetchSchedulerStatus() {
-    const res = await fetch('/api/scheduler/control');
-    const data = await res.json();
-    setSchedulerRunning(data.running);
+    try {
+      const res = await fetch(`/api/scheduler/control?since=${lastEventId.current}`);
+      const data = await res.json();
+      setStatus(data);
+      appendEvents(data.events);
+    } catch {
+      // dev server restarted mid-poll; the next tick recovers
+    }
   }
 
   async function toggleScheduler() {
@@ -49,12 +109,40 @@ export default function SettingsPage() {
       const res = await fetch('/api/scheduler/control', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: schedulerRunning ? 'stop' : 'start' }),
+        body: JSON.stringify({
+          action: status?.running ? 'stop' : 'start',
+          headless: !showBrowser,
+        }),
       });
       const data = await res.json();
-      setSchedulerRunning(data.running);
+      setStatus(data);
+      appendEvents(data.events, true);
     } finally {
       setTogglingScheduler(false);
+    }
+  }
+
+  /** Runs one rule immediately so you can watch the browser do the work. */
+  async function runRuleNow(rule: ScheduleRule) {
+    setRunningRuleId(rule.id);
+    try {
+      const res = await fetch(`/api/scheduler/${rule.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ headless: !showBrowser, force: true }),
+      });
+      const result = await res.json();
+      if (result.outcome === 'published') {
+        alert(`✓ Publicado en "${result.groupName}"`);
+      } else if (result.outcome === 'failed') {
+        alert(`✗ Falló en "${result.groupName}":\n\n${result.reason}`);
+      } else {
+        alert(`No se publicó:\n\n${result.reason ?? result.error ?? 'motivo desconocido'}`);
+      }
+      fetchAll();
+    } finally {
+      setRunningRuleId(null);
+      fetchSchedulerStatus();
     }
   }
 
@@ -132,23 +220,96 @@ export default function SettingsPage() {
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="font-medium text-amber-200 flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${schedulerRunning ? 'bg-green-500' : 'bg-gray-600'}`} />
-              Scheduler: {schedulerRunning === null ? 'consultando…' : schedulerRunning ? 'corriendo' : 'detenido'}
+              <span className={`w-2 h-2 rounded-full ${status?.running ? 'bg-green-500' : 'bg-gray-600'}`} />
+              Scheduler: {status === null ? 'consultando…' : status.running ? 'corriendo' : 'detenido'}
+              {status?.running && (
+                <span className="text-xs font-normal text-amber-200/70">
+                  · {status.scheduledRules} regla(s) programada(s) · navegador{' '}
+                  {status.headless ? 'oculto' : 'visible'} · desde {formatTime(status.startedAt)}
+                </span>
+              )}
             </p>
             <p className="text-sm text-amber-200/80 mt-1">
               Las reglas de aquí no publican nada por sí solas — hace falta el scheduler encendido.
               Aplica a todas las cuentas con reglas activas, no solo a la cuenta seleccionada.
             </p>
+            {status?.running && status.scheduledRules === 0 && (
+              <p className="text-sm text-red-400 mt-1">
+                Encendido pero sin ninguna regla programada — no va a publicar nada. Revisa que haya
+                reglas activas y que su cuenta esté activa.
+              </p>
+            )}
           </div>
-          <button
-            onClick={toggleScheduler}
-            disabled={schedulerRunning === null || togglingScheduler}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
-              schedulerRunning ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
-            }`}
-          >
-            {togglingScheduler ? 'Aplicando…' : schedulerRunning ? 'Apagar scheduler' : 'Encender scheduler'}
-          </button>
+          <div className="flex flex-col items-end gap-2">
+            <button
+              onClick={toggleScheduler}
+              disabled={status === null || togglingScheduler}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
+                status?.running ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30' : 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
+              }`}
+            >
+              {togglingScheduler ? 'Aplicando…' : status?.running ? 'Apagar scheduler' : 'Encender scheduler'}
+            </button>
+            <label className="flex items-center gap-2 text-xs text-amber-200/80 whitespace-nowrap">
+              <input
+                type="checkbox"
+                checked={showBrowser}
+                onChange={(e) => {
+                  setShowBrowser(e.target.checked);
+                  localStorage.setItem(SHOW_BROWSER_KEY, String(e.target.checked));
+                }}
+                className="rounded border-gray-700 bg-gray-800"
+              />
+              Ver el navegador al publicar
+            </label>
+          </div>
+        </div>
+
+        {/* Per-rule live state: what each cron task is doing and when it fires next */}
+        {status?.running && status.rules.length > 0 && (
+          <div className="mt-4 space-y-1.5">
+            {status.rules.map((r) => (
+              <div key={r.id} className="flex items-center justify-between gap-3 text-xs bg-gray-900/50 rounded px-3 py-2">
+                <span className="font-medium text-gray-200 truncate">{r.name}</span>
+                <span className="text-gray-400 whitespace-nowrap">
+                  {r.phase === 'publishing' && <span className="text-blue-400">▶ {r.detail ?? 'publicando…'}</span>}
+                  {r.phase === 'waiting-jitter' && (
+                    <span className="text-purple-400">
+                      ⏳ jitter — publica {formatCountdown(r.waitingUntil)} ({formatTime(r.waitingUntil)})
+                    </span>
+                  )}
+                  {r.phase === 'idle' && (
+                    <span>
+                      próxima {formatTime(r.nextRun)} {formatCountdown(r.nextRun)}
+                      {r.detail && <span className="text-amber-400"> · {r.detail}</span>}
+                    </span>
+                  )}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Activity log — the scheduler's console output, surfaced in the UI */}
+        <div className="mt-4">
+          <p className="text-xs font-medium text-amber-200/80 mb-1.5">Actividad del scheduler</p>
+          <div className="bg-gray-950 border border-gray-800 rounded-lg p-3 max-h-56 overflow-y-auto font-mono text-xs space-y-1">
+            {events.length === 0 ? (
+              <p className="text-gray-600">
+                Sin actividad todavía. Enciende el scheduler o usa &quot;Ejecutar ahora&quot; en una regla.
+              </p>
+            ) : (
+              [...events].reverse().map((e) => (
+                <div key={e.id} className="flex gap-2">
+                  <span className="text-gray-600 shrink-0">{formatTime(e.at)}</span>
+                  <span className={EVENT_COLORS[e.level]}>
+                    {e.ruleName && <span className="text-gray-500">[{e.ruleName}] </span>}
+                    {e.message}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
         </div>
         <p className="text-xs text-amber-200/60 mt-3">
           Equivalente a <code className="bg-gray-900 rounded px-1.5 py-0.5 font-mono">npm run cli -- schedule start</code> por
@@ -309,6 +470,18 @@ export default function SettingsPage() {
                   </p>
                 </div>
                 <div className="flex gap-2">
+                  <button
+                    onClick={() => runRuleNow(rule)}
+                    disabled={runningRuleId !== null}
+                    title={
+                      showBrowser
+                        ? 'Ejecuta la regla ahora con el navegador visible'
+                        : 'Ejecuta la regla ahora (navegador oculto — marca "Ver el navegador" para verlo)'
+                    }
+                    className="px-3 py-1 bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 rounded text-xs disabled:opacity-50"
+                  >
+                    {runningRuleId === rule.id ? 'Ejecutando…' : 'Ejecutar ahora'}
+                  </button>
                   <button
                     onClick={() => toggleSchedule(rule)}
                     className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
