@@ -5,10 +5,13 @@
 # ships inside the folder, and all runtime state lives in .\data.
 #
 # Usage:  powershell -ExecutionPolicy Bypass -File scripts\build-dist.ps1
-#         powershell ... -File scripts\build-dist.ps1 -SkipNextBuild   (reuse .next)
+#         -SkipNextBuild  reutiliza el .next existente
+#         -DownloadNode   baja node.exe de nodejs.org en vez de copiar el local
+#         -Zip            genera tambien dist/fb-publisher-portable.zip
 
 param(
   [switch]$SkipNextBuild,
+  [switch]$DownloadNode,
   [switch]$Zip
 )
 
@@ -49,6 +52,17 @@ if (Test-Path (Join-Path $Root 'public')) {
   Copy-Item (Join-Path $Root 'public') (Join-Path $AppDir 'public') -Recurse -Force
 }
 
+# Defense in depth against shipping developer state: outputFileTracingExcludes
+# already keeps these out, but a stale trace or a new cwd-relative read would
+# leak a logged-in Facebook session, so drop them from the copy unconditionally.
+foreach ($leak in @('data', 'dist', 'docs', 'notas', '.env', '.env.local')) {
+  $p = Join-Path $AppDir $leak
+  if (Test-Path $p) {
+    Write-Host "    descartando app\$leak (estado de desarrollo)"
+    Remove-Item $p -Recurse -Force
+  }
+}
+
 # ------------------------------------------------------------------ 3. CLI ---
 # The dashboard's "iniciar sesion" button spawns this file; the packaged app
 # has no tsx and no npm, so the CLI is pre-bundled to plain CommonJS.
@@ -67,33 +81,57 @@ Step 'Compilando CLI (esbuild)'
   --outfile="$AppDir\cli.js"
 if ($LASTEXITCODE -ne 0) { throw 'esbuild (cli) failed' }
 
+# The tracer only copies the files each package's ESM entry actually reaches:
+# node_modules\playwright ends up as index.mjs + package.json, which the Next
+# server can import but a CJS `require('playwright')` (our cli.js, and
+# playwright's own internals) cannot resolve. Replace those three with the
+# complete packages.
 foreach ($mod in @('better-sqlite3', 'playwright', 'playwright-core')) {
-  if (-not (Test-Path (Join-Path $AppDir "node_modules\$mod"))) {
-    throw "Falta node_modules\$mod en el standalone. Revisa que alguna ruta del server lo importe."
-  }
+  $src = Join-Path $Root "node_modules\$mod"
+  if (-not (Test-Path $src)) { throw "Falta node_modules\$mod. Ejecuta npm install." }
+  $dst = Join-Path $AppDir "node_modules\$mod"
+  if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
+  Copy-Item $src $dst -Recurse -Force
 }
 
 # -------------------------------------------------------------- 4. runtime ---
-# The bundled node.exe must match the local major version: better-sqlite3's
-# prebuilt .node binary is compiled against this Node ABI.
+# The bundled node.exe must match the Node that ran `npm install`: the
+# better-sqlite3 prebuilt .node is compiled against that exact ABI. Copying the
+# local binary guarantees the match (and needs no network); node.exe is
+# self-contained, the rest of the official zip is not needed.
 $NodeVer = (& node -v).Trim()
-Step "Descargando runtime Node $NodeVer (win-x64)"
 $RuntimeDir = Join-Path $Out 'runtime'
 New-Item -ItemType Directory -Path $RuntimeDir -Force | Out-Null
 
-$cacheZip = Join-Path $env:TEMP "node-$NodeVer-win-x64.zip"
-if (-not (Test-Path $cacheZip)) {
-  Invoke-WebRequest "https://nodejs.org/dist/$NodeVer/node-$NodeVer-win-x64.zip" -OutFile $cacheZip
+if ($DownloadNode) {
+  Step "Descargando runtime Node $NodeVer (win-x64)"
+  $cacheZip = Join-Path $env:TEMP "node-$NodeVer-win-x64.zip"
+  if (-not (Test-Path $cacheZip)) {
+    # curl.exe resumes and retries; Invoke-WebRequest times out on slow links.
+    & curl.exe -L --retry 5 --retry-all-errors -C - -o $cacheZip "https://nodejs.org/dist/$NodeVer/node-$NodeVer-win-x64.zip"
+    if ($LASTEXITCODE -ne 0) { throw 'No se pudo descargar el runtime de Node' }
+  }
+  $tmpNode = Join-Path $env:TEMP "node-extract-$NodeVer"
+  if (Test-Path $tmpNode) { Remove-Item $tmpNode -Recurse -Force }
+  Expand-Archive $cacheZip -DestinationPath $tmpNode -Force
+  Copy-Item (Join-Path (Join-Path $tmpNode "node-$NodeVer-win-x64") 'node.exe') (Join-Path $RuntimeDir 'node.exe') -Force
+  Remove-Item $tmpNode -Recurse -Force
+} else {
+  $localNode = (Get-Command node).Source
+  Step "Copiando runtime Node $NodeVer desde $localNode"
+  Copy-Item $localNode (Join-Path $RuntimeDir 'node.exe') -Force
 }
-$tmpNode = Join-Path $env:TEMP "node-extract-$NodeVer"
-if (Test-Path $tmpNode) { Remove-Item $tmpNode -Recurse -Force }
-Expand-Archive $cacheZip -DestinationPath $tmpNode -Force
-Copy-Item (Join-Path $tmpNode "node-$NodeVer-win-x64\node.exe") (Join-Path $RuntimeDir 'node.exe') -Force
-Remove-Item $tmpNode -Recurse -Force
 
 # ------------------------------------------------------------- 5. chromium ---
 Step 'Copiando Chromium de Playwright'
-$chromeExe = (& node -e "console.log(require('playwright').chromium.executablePath())").Trim()
+# Read the path through a file, not stdout: Windows PowerShell 5.1 decodes a
+# child process's output as ANSI, which mangles non-ASCII user folders and
+# makes Test-Path fail on them.
+$pathFile = Join-Path $env:TEMP 'fbp-chromium-path.txt'
+& node -e "require('fs').writeFileSync(process.argv[1], require('playwright').chromium.executablePath())" $pathFile
+if ($LASTEXITCODE -ne 0) { throw 'No se pudo resolver la ruta de Chromium con Playwright' }
+$chromeExe = (Get-Content $pathFile -Raw -Encoding UTF8).Trim()
+Remove-Item $pathFile -Force
 if (-not (Test-Path $chromeExe)) { throw "Chromium no encontrado ($chromeExe). Ejecuta: npx playwright install chromium" }
 
 # ...\ms-playwright\chromium-1217\chrome-win64\chrome.exe -> ms-playwright, chromium-1217
@@ -203,7 +241,13 @@ if ($Zip) {
   Step 'Comprimiendo'
   $zipPath = Join-Path $Dist 'fb-publisher-portable.zip'
   if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-  Compress-Archive -Path $Out -DestinationPath $zipPath
+  # tar.exe (bsdtar, shipped with Windows 10+) instead of Compress-Archive:
+  # the latter fails with PermissionDenied on this tree and is far slower.
+  # Full path on purpose: a Git-for-Windows GNU tar earlier in PATH would
+  # happily write a plain tar under a .zip name.
+  $bsdtar = Join-Path $env:SystemRoot 'System32	ar.exe'
+  & $bsdtar -a -c -f $zipPath -C $Dist 'fb-publisher'
+  if ($LASTEXITCODE -ne 0) { throw 'No se pudo comprimir el paquete' }
   Write-Host "    $zipPath"
 }
 

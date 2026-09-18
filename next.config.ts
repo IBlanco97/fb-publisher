@@ -10,6 +10,13 @@ const nextConfig: NextConfig = {
   // (.next/standalone/fb-publisher/server.js), breaking the launcher paths.
   turbopack: { root: __dirname },
   outputFileTracingRoot: __dirname,
+  // The db and Playwright session dirs are resolved at runtime from
+  // process.cwd(), which the tracer reads as a static dependency and copies
+  // wholesale into the standalone output. Shipping them would leak the
+  // developer's logged-in Facebook session and their real database.
+  outputFileTracingExcludes: {
+    "/*": ["data/**", "dist/**", "docs/**", "notas/**", ".next/cache/**"],
+  },
 };
 
 export default nextConfig;

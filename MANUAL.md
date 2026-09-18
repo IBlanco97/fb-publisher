@@ -25,6 +25,8 @@ Usa Playwright con `m.facebook.com` (la versión móvil ligera de Facebook) para
 
 ## 1. Instalación y configuración
 
+> **¿Vas a usar la versión portable?** Si recibiste una carpeta con `Iniciar FB Publisher.bat`, salta esta sección completa: no necesitas Node, npm ni configurar nada. Lee el `LEEME.txt` que viene dentro y continúa en [2. Primer uso](#2-primer-uso-iniciar-sesión-en-facebook).
+
 ### Requisitos previos
 
 - Node.js 18 o superior
