@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { name, groupIds, templateIds, cronExpression, timezone, useJitter, accountId } = body;
+  const { name, groupIds, tagIds, templateIds, cronExpression, timezone, useJitter, accountId } = body;
 
   if (!name || !cronExpression) {
     return NextResponse.json({ error: 'name and cronExpression are required' }, { status: 400 });
@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
     accountId: accountId || DEFAULT_ACCOUNT_ID,
     name,
     groupIds: groupIds || [],
+    tagIds: tagIds || [],
     templateIds: templateIds || [],
     cronExpression,
     rotationIndex: 0,

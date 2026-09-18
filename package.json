@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "cli": "npx tsx src/lib/cli/index.ts",
-    "postinstall": "npx playwright install chromium"
+    "postinstall": "npx playwright install chromium",
+    "package": "powershell -ExecutionPolicy Bypass -File scripts/build-dist.ps1"
   },
   "dependencies": {
     "better-sqlite3": "^12.9.0",
@@ -27,8 +28,10 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/uuid": "^10.0.0",
+    "esbuild": "^0.28.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
+    "exceljs": "^4.4.0",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
     "typescript": "^5"

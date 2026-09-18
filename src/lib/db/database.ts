@@ -1,7 +1,13 @@
 import Database from 'better-sqlite3';
 import path from 'path';
+import { getDataDir } from '../config';
 
-const DB_PATH = path.join(process.cwd(), 'data', 'fb-publisher.db');
+/**
+ * Overridable so scripts and manual testing can point at a throwaway copy
+ * instead of the live database.
+ */
+const DB_PATH = process.env.FB_PUBLISHER_DB_PATH
+  || path.join(getDataDir(), 'fb-publisher.db');
 
 let db: Database.Database | null = null;
 
@@ -90,6 +96,25 @@ function initSchema(db: Database.Database) {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS tags (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL DEFAULT 'default',
+      name TEXT NOT NULL,
+      color TEXT NOT NULL DEFAULT '#3b82f6',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS group_tags (
+      group_id TEXT NOT NULL,
+      tag_id TEXT NOT NULL,
+      PRIMARY KEY (group_id, tag_id),
+      FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+      FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_account_name ON tags(account_id, name);
+    CREATE INDEX IF NOT EXISTS idx_group_tags_tag ON group_tags(tag_id);
     CREATE INDEX IF NOT EXISTS idx_publications_status ON publications(status);
     CREATE INDEX IF NOT EXISTS idx_publications_group ON publications(group_id);
     CREATE INDEX IF NOT EXISTS idx_publications_scheduled ON publications(scheduled_at);
@@ -97,6 +122,7 @@ function initSchema(db: Database.Database) {
 
   migrateGroupsMembershipColumns(db);
   migrateScheduleRulesJitterColumn(db);
+  migrateScheduleRulesTagColumn(db);
   migrateAccountScoping(db);
 }
 
@@ -161,6 +187,21 @@ function migrateScheduleRulesJitterColumn(db: Database.Database) {
 
   if (!columnNames.has('use_jitter')) {
     db.exec(`ALTER TABLE schedule_rules ADD COLUMN use_jitter INTEGER NOT NULL DEFAULT 1`);
+  }
+}
+
+/**
+ * Adds the tag-based target column to `schedule_rules` created before tags
+ * existed. Defaults to '[]', which the scheduler reads as "all active groups"
+ * — but only for rules that have no legacy `group_ids`, so existing rules keep
+ * their fixed target until someone edits them.
+ */
+function migrateScheduleRulesTagColumn(db: Database.Database) {
+  const columns = db.prepare(`PRAGMA table_info(schedule_rules)`).all() as Array<{ name: string }>;
+  const columnNames = new Set(columns.map((c) => c.name));
+
+  if (!columnNames.has('tag_ids')) {
+    db.exec(`ALTER TABLE schedule_rules ADD COLUMN tag_ids TEXT NOT NULL DEFAULT '[]'`);
   }
 }
 

@@ -10,6 +10,25 @@ type CronTask = ReturnType<typeof cron.schedule>;
 const activeTasks = new Map<string, CronTask>();
 let running = false;
 
+/**
+ * Turns a rule's target into the list of group ids it may publish to now.
+ *
+ * Order matters: a legacy rule with a frozen `groupIds` and no tags must keep
+ * its original target, otherwise upgrading the app would silently widen it to
+ * every group in the account.
+ */
+export function resolveRuleTargets(rule: ScheduleRule): string[] {
+  if (rule.tagIds.length > 0) {
+    return groupsRepo.getActiveByTags(rule.tagIds, rule.accountId).map((g) => g.id);
+  }
+  if (rule.groupIds.length > 0) {
+    // Legacy fixed list - drop ids that no longer exist or went inactive.
+    const active = new Set(groupsRepo.getActive(rule.accountId).map((g) => g.id));
+    return rule.groupIds.filter((id) => active.has(id));
+  }
+  return groupsRepo.getActive(rule.accountId).map((g) => g.id);
+}
+
 export function isSchedulerRunning(): boolean {
   return running;
 }
@@ -125,8 +144,22 @@ async function executeRule(
   const rule = scheduleRepo.getById(ruleId);
   if (!rule || !rule.isActive) return;
 
-  if (rule.templateIds.length === 0 || rule.groupIds.length === 0) {
-    console.log(`[Scheduler] Rule "${rule.name}" skipped: no templates or groups configured`);
+  if (rule.templateIds.length === 0) {
+    console.log(`[Scheduler] Rule "${rule.name}" skipped: no templates configured`);
+    return;
+  }
+
+  // Resolve the rule's target to concrete group ids at fire time.
+  //
+  // Tags are resolved on every tick rather than stored, so a group added to a
+  // tag is picked up by existing rules without editing them. `tagIds: []` means
+  // "all active groups" (the implicit "Todos"), EXCEPT for rules created before
+  // tags existed, which keep publishing to their frozen `groupIds` list until
+  // someone edits them.
+  const targetGroupIds = resolveRuleTargets(rule);
+
+  if (targetGroupIds.length === 0) {
+    console.log(`[Scheduler] Rule "${rule.name}" skipped: target resolves to no active groups`);
     return;
   }
 
@@ -173,12 +206,12 @@ async function executeRule(
   // Deterministic selection of template and group
   const { templateIndex, groupIndex } = selectTemplateAndGroup(
     rule.templateIds,
-    rule.groupIds,
+    targetGroupIds,
     rule.rotationIndex
   );
 
   const templateId = rule.templateIds[templateIndex];
-  const groupId = rule.groupIds[groupIndex];
+  const groupId = targetGroupIds[groupIndex];
 
   const template = templatesRepo.getById(templateId);
   const group = groupsRepo.getById(groupId);

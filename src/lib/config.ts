@@ -26,6 +26,15 @@ export function getConfig(): AppConfig {
 }
 
 /**
+ * Root folder for everything the app writes at runtime (database, browser
+ * sessions). Packaged builds set FB_PUBLISHER_DATA_DIR because the server runs
+ * from inside the bundled `app/` folder, which must stay read-only.
+ */
+export function getDataDir(): string {
+  return process.env.FB_PUBLISHER_DATA_DIR || path.join(process.cwd(), 'data');
+}
+
+/**
  * Resolves the Playwright persistent session directory for an account.
  * The `default` account keeps honoring PLAYWRIGHT_USER_DATA_DIR so existing
  * installs don't lose an already-completed login when this feature ships.
@@ -34,5 +43,5 @@ export function getAccountUserDataDir(accountId: string): string {
   if (accountId === DEFAULT_ACCOUNT_ID && process.env.PLAYWRIGHT_USER_DATA_DIR) {
     return process.env.PLAYWRIGHT_USER_DATA_DIR;
   }
-  return path.join(process.cwd(), 'data', 'browser-sessions', accountId);
+  return path.join(getDataDir(), 'browser-sessions', accountId);
 }

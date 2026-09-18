@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { ScheduleRule } from '@/lib/types';
+import type { GroupTag, ScheduleRule } from '@/lib/types';
 import { useAccount } from '../account-context';
 
 const LAST_TIMEZONE_KEY = 'fb-publisher:last-timezone';
@@ -10,6 +10,8 @@ const DEFAULT_TIMEZONE = 'America/Bogota';
 export default function SettingsPage() {
   const { accountId } = useAccount();
   const [schedules, setSchedules] = useState<ScheduleRule[]>([]);
+  const [tags, setTags] = useState<GroupTag[]>([]);
+  const [coverage, setCoverage] = useState<Coverage | null>(null);
   const [groups, setGroups] = useState<any[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -17,7 +19,7 @@ export default function SettingsPage() {
   const [togglingScheduler, setTogglingScheduler] = useState(false);
   const [form, setForm] = useState({
     name: '',
-    groupIds: [] as string[],
+    tagIds: [] as string[],
     templateIds: [] as string[],
     cronExpression: '0 9,14,19 * * *',
     timezone: DEFAULT_TIMEZONE,
@@ -63,15 +65,30 @@ export default function SettingsPage() {
     fetchAll();
   }, [accountId]);
 
+  // How many groups the current tag selection actually resolves to, and how
+  // long a full rotation over them takes. Recomputed server-side so it matches
+  // exactly what the scheduler will do at fire time.
+  useEffect(() => {
+    if (!showForm) return;
+    const params = new URLSearchParams({ accountId, tagIds: form.tagIds.join(',') });
+    let cancelled = false;
+    fetch(`/api/tags/resolve?${params}`)
+      .then((r) => r.json())
+      .then((data) => { if (!cancelled) setCoverage(data); });
+    return () => { cancelled = true; };
+  }, [accountId, form.tagIds, showForm, groups.length]);
+
   async function fetchAll() {
-    const [s, g, t] = await Promise.all([
+    const [s, g, t, tg] = await Promise.all([
       fetch(`/api/scheduler?accountId=${accountId}`).then((r) => r.json()),
       fetch(`/api/groups?accountId=${accountId}`).then((r) => r.json()),
       fetch(`/api/templates?accountId=${accountId}`).then((r) => r.json()),
+      fetch(`/api/tags?accountId=${accountId}`).then((r) => r.json()),
     ]);
     setSchedules(s);
     setGroups(g);
     setTemplates(t);
+    setTags(tg);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -82,7 +99,7 @@ export default function SettingsPage() {
       body: JSON.stringify({ ...form, accountId }),
     });
     setShowForm(false);
-    setForm((f) => ({ name: '', groupIds: [], templateIds: [], cronExpression: '0 9,14,19 * * *', timezone: f.timezone, useJitter: true }));
+    setForm((f) => ({ name: '', tagIds: [], templateIds: [], cronExpression: '0 9,14,19 * * *', timezone: f.timezone, useJitter: true }));
     fetchAll();
   }
 
@@ -172,26 +189,67 @@ export default function SettingsPage() {
             />
           </div>
 
-          {/* Group selection */}
+          {/* Target selection - by tag, never group by group */}
           <div>
-            <label className="block text-sm text-gray-400 mb-2">Grupos</label>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-              {groups.map((g) => (
+            <label className="block text-sm text-gray-400 mb-2">Dónde publicar</label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, tagIds: [] }))}
+                className={`px-3 py-2 rounded-lg text-sm border transition-colors ${
+                  form.tagIds.length === 0
+                    ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                    : 'border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600'
+                }`}
+              >
+                Todos los grupos
+              </button>
+              {tags.map((tag) => (
                 <button
-                  key={g.id}
+                  key={tag.id}
                   type="button"
-                  onClick={() => setForm((f) => ({ ...f, groupIds: toggleSelection(f.groupIds, g.id) }))}
-                  className={`text-left px-3 py-2 rounded-lg text-sm border transition-colors ${
-                    form.groupIds.includes(g.id)
-                      ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                  onClick={() => setForm((f) => ({ ...f, tagIds: toggleSelection(f.tagIds, tag.id) }))}
+                  className={`px-3 py-2 rounded-lg text-sm border transition-colors ${
+                    form.tagIds.includes(tag.id)
+                      ? 'bg-gray-700 text-white'
                       : 'border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600'
                   }`}
+                  style={form.tagIds.includes(tag.id) ? { borderColor: tag.color } : undefined}
                 >
-                  {g.name}
+                  <span className="inline-block w-2 h-2 rounded-full mr-1.5 align-middle" style={{ background: tag.color }} />
+                  {tag.name} ({tag.groupCount ?? 0})
                 </button>
               ))}
             </div>
-            {groups.length === 0 && <p className="text-xs text-gray-600">Crea grupos primero</p>}
+
+            {coverage && (
+              <p className="text-xs mt-2 text-gray-400">
+                {coverage.groupCount === 0 ? (
+                  <span className="text-yellow-500">
+                    Esta selección no incluye ningún grupo activo
+                    {coverage.inactiveCount > 0 && ` (${coverage.inactiveCount} inactivos)`}.
+                    La regla no publicará.
+                  </span>
+                ) : (
+                  <>
+                    <span className="text-gray-300 font-medium">{coverage.groupCount} grupos activos</span>
+                    {coverage.inactiveCount > 0 && ` de ${coverage.totalCount} (${coverage.inactiveCount} inactivos, no se publica en ellos)`}
+                    {' · '}
+                    una vuelta completa tarda ~
+                    <span className="text-gray-300">{coverage.fullRotationDays} días</span>
+                    {' '}al ritmo máximo de {coverage.maxPostsPerDay} publicaciones/día
+                    {coverage.fullRotationDays > 14 && (
+                      <span className="text-yellow-600"> — considera segmentar por tags</span>
+                    )}
+                  </>
+                )}
+              </p>
+            )}
+            {tags.length === 0 && (
+              <p className="text-xs text-gray-600 mt-2">
+                No hay tags todavía. Créalos desde Grupos seleccionando varios y pulsando «Crear y asignar».
+              </p>
+            )}
           </div>
 
           {/* Template selection */}
@@ -304,7 +362,7 @@ export default function SettingsPage() {
                   </div>
                   <p className="text-xs text-gray-500 mt-1">
                     <span className="font-mono">{rule.cronExpression}</span> · {rule.timezone} ·
-                    {rule.groupIds.length} grupos · {rule.templateIds.length} plantillas ·
+                    {describeTarget(rule, tags)} · {rule.templateIds.length} plantillas ·
                     rotación #{rule.rotationIndex} · jitter {rule.useJitter ? 'on' : 'off'}
                   </p>
                 </div>
@@ -328,4 +386,26 @@ export default function SettingsPage() {
       </div>
     </div>
   );
+}
+
+interface Coverage {
+  groupCount: number;
+  totalCount: number;
+  inactiveCount: number;
+  isAllGroups: boolean;
+  maxPostsPerDay: number;
+  fullRotationDays: number;
+}
+
+/**
+ * Human-readable target of a rule, covering the legacy case: rules created
+ * before tags existed still carry a frozen `groupIds` list and no tags.
+ */
+function describeTarget(rule: ScheduleRule, tags: GroupTag[]): string {
+  if (rule.tagIds.length > 0) {
+    const names = rule.tagIds.map((id) => tags.find((t) => t.id === id)?.name ?? '?');
+    return `tags: ${names.join(', ')}`;
+  }
+  if (rule.groupIds.length > 0) return `${rule.groupIds.length} grupos (lista fija)`;
+  return 'todos los grupos';
 }

@@ -15,15 +15,26 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   // Reuses the existing CLI login flow as a detached child process — it opens
   // a visible Chromium window ON THIS MACHINE (the one running the Next.js
   // server), not on whatever device is viewing the dashboard.
-  // shell:true is required on Windows to resolve npm.cmd (spawning it
-  // directly fails with EINVAL) — injection is prevented by the strict
-  // allowlist regex on `id` above, not by argv-vs-shell semantics.
-  const child = spawn('npm', ['run', 'cli', '--', 'login', '--account', id], {
-    cwd: process.cwd(),
-    detached: true,
-    stdio: 'ignore',
-    shell: true,
-  });
+  //
+  // Packaged builds set FB_PUBLISHER_CLI to a precompiled cli.js and run
+  // without npm on the machine, so there we spawn the bundled node directly.
+  // In development we fall back to `npm run cli`, where shell:true is required
+  // on Windows to resolve npm.cmd (spawning it directly fails with EINVAL).
+  // Injection is prevented by the strict allowlist regex on `id` above, not by
+  // argv-vs-shell semantics.
+  const packagedCli = process.env.FB_PUBLISHER_CLI;
+  const child = packagedCli
+    ? spawn(process.execPath, [packagedCli, 'login', '--account', id], {
+        cwd: process.cwd(),
+        detached: true,
+        stdio: 'ignore',
+      })
+    : spawn('npm', ['run', 'cli', '--', 'login', '--account', id], {
+        cwd: process.cwd(),
+        detached: true,
+        stdio: 'ignore',
+        shell: true,
+      });
   child.unref();
 
   return NextResponse.json({ started: true });
