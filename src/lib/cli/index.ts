@@ -114,6 +114,7 @@ function printHelp() {
     --account <id>                      Cuenta a usar (default: una sola cuenta "default")
     --rotation <number>                 Índice de rotación
     --no-headless                       Mostrar navegador
+    --force                             (schedule trigger) Ignorar espaciados mínimos
   `);
 }
 
@@ -435,7 +436,7 @@ async function handleSchedule(args: string[]) {
     case 'start': {
       const noHeadless = args.includes('--no-headless');
       console.log('Iniciando scheduler (todas las cuentas activas)...');
-      startScheduler(noHeadless ? false : undefined);
+      startScheduler(noHeadless ? { headless: false } : {});
       console.log('Scheduler activo. Presiona Ctrl+C para detener.');
       await new Promise(() => {});
       break;
@@ -443,12 +444,20 @@ async function handleSchedule(args: string[]) {
     case 'trigger': {
       const rest = stripFlags(args.slice(1), ['--account']);
       const ruleId = rest[0];
-      if (!ruleId) { console.log('Uso: schedule trigger <ruleId>'); return; }
+      if (!ruleId) { console.log('Uso: schedule trigger <ruleId> [--no-headless] [--force]'); return; }
       const rule = scheduleRepo.getById(ruleId);
       if (!rule) { console.log('Regla no encontrada.'); return; }
+      const showBrowser = args.includes('--no-headless');
       console.log('Ejecutando regla...');
-      const publisher = createPublisher(rule.accountId);
-      await triggerRule(ruleId, publisher);
+      const publisher = createPublisher(rule.accountId, showBrowser ? false : undefined);
+      const result = await triggerRule(ruleId, publisher, { force: args.includes('--force') });
+      if (result.outcome === 'published') {
+        console.log(`✓ Publicado en "${result.groupName}"`);
+      } else if (result.outcome === 'failed') {
+        console.log(`✗ Falló en "${result.groupName}": ${result.reason}`);
+      } else {
+        console.log(`– Omitido: ${result.reason}`);
+      }
       break;
     }
     case 'stop': {
