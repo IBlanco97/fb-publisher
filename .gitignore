@@ -50,3 +50,6 @@ next-env.d.ts
 
 # packaged portable build
 /dist/
+
+# estado local de Claude Code (incluye worktrees: nunca commitear)
+/.claude/
