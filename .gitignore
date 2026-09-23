@@ -44,3 +44,12 @@ next-env.d.ts
 # fb-publisher
 /data/
 .playwright-mcp/
+
+# notas de trabajo locales (no compartir)
+/notas/
+
+# packaged portable build
+/dist/
+
+# estado local de Claude Code (incluye worktrees: nunca commitear)
+/.claude/

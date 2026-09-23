@@ -17,6 +17,16 @@ export interface FacebookAccount {
   updatedAt: string;
 }
 
+export interface GroupTag {
+  id: string;
+  accountId: string;
+  name: string;
+  color: string; // hex, used for the chip in the UI
+  groupCount?: number; // resolved on read, not stored
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface FacebookGroup {
   id: string;
   accountId: string;
@@ -24,6 +34,7 @@ export interface FacebookGroup {
   fbGroupId: string; // Facebook's group ID
   url: string;
   category?: string;
+  tagIds: string[]; // tags this group belongs to
   isActive: boolean;
   maxPostsPerDay: number;
   cooldownMinutes: number; // minimum minutes between posts
@@ -74,7 +85,17 @@ export interface ScheduleRule {
   id: string;
   accountId: string;
   name: string;
-  groupIds: string[]; // groups to publish to
+  /**
+   * Tags whose groups this rule publishes to. Resolved at fire time, so a
+   * group added to the tag later is picked up without editing the rule.
+   * Empty array means "all active groups" — the implicit "Todos" tag.
+   */
+  tagIds: string[];
+  /**
+   * Legacy fixed list of group ids, kept so rules created before tags existed
+   * keep working. When `tagIds` is non-empty this is ignored.
+   */
+  groupIds: string[];
   templateIds: string[]; // templates to rotate through
   cronExpression: string; // e.g., "0 9,14,19 * * *" = 9am, 2pm, 7pm
   rotationIndex: number; // current position in deterministic rotation

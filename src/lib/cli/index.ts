@@ -115,6 +115,7 @@ function printHelp() {
     --account <id>                      Cuenta a usar (default: una sola cuenta "default")
     --rotation <number>                 Índice de rotación
     --no-headless                       Mostrar navegador
+    --force                             (schedule trigger) Ignorar espaciados mínimos
   `);
 }
 
@@ -444,14 +445,23 @@ async function handleSchedule(args: string[]) {
     }
     case 'trigger': {
       const dryRun = args.includes('--dry-run');
-      const rest = stripFlags(args.slice(1), ['--account']).filter((a) => a !== '--dry-run');
+      const showBrowser = args.includes('--no-headless');
+      const force = args.includes('--force');
+      const rest = stripFlags(args.slice(1), ['--account']).filter((a) => !['--dry-run', '--no-headless', '--force'].includes(a));
       const ruleId = rest[0];
-      if (!ruleId) { console.log('Uso: schedule trigger <ruleId> [--dry-run]'); return; }
+      if (!ruleId) { console.log('Uso: schedule trigger <ruleId> [--dry-run] [--no-headless] [--force]'); return; }
       const rule = scheduleRepo.getById(ruleId);
       if (!rule) { console.log('Regla no encontrada.'); return; }
       console.log(`Ejecutando regla${dryRun ? ' [DRY RUN]' : ''}...`);
-      const publisher = createPublisher(rule.accountId, undefined, dryRun);
-      await triggerRule(ruleId, publisher);
+      const publisher = createPublisher(rule.accountId, showBrowser ? false : undefined, dryRun);
+      const result = await triggerRule(ruleId, publisher, { force });
+      if (result.outcome === 'published') {
+        console.log(`✓ Publicado en "${result.groupName}"`);
+      } else if (result.outcome === 'failed') {
+        console.log(`✗ Falló en "${result.groupName}": ${result.reason}`);
+      } else {
+        console.log(`– Omitido: ${result.reason}`);
+      }
       break;
     }
     case 'stop': {

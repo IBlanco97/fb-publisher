@@ -48,6 +48,39 @@ Ver la [guía completa de instalación y primer uso](./MANUAL.md#1-instalación-
 
 > **Nota:** crear reglas de programación desde el dashboard no las ejecuta solas — hace falta dejar corriendo aparte `npm run cli -- schedule start` (ver [sección 8 del manual](./MANUAL.md#8-programación-automática-scheduler)).
 
+## Empaquetar para un usuario final
+
+Genera una carpeta portable para Windows 64 bits que **no requiere Node, npm ni Playwright** en la máquina destino:
+
+```bash
+npm run package        # equivale a: powershell -ExecutionPolicy Bypass -File scripts/build-dist.ps1
+```
+
+Resultado en `dist/fb-publisher/` (~795 MB en disco, ~340 MB comprimido):
+
+```
+fb-publisher/
+├── Iniciar FB Publisher.bat   # launcher: arranca el server y abre el dashboard
+├── LEEME.txt                  # instrucciones para el usuario final
+├── app/                       # build standalone de Next + cli.js compilado
+├── runtime/node.exe           # Node embebido (misma versión que la de build)
+├── browsers/                  # Chromium + headless shell de Playwright
+└── data/                      # SQLite y sesiones del navegador (se llena al usar)
+```
+
+Flags del script:
+
+- `-SkipNextBuild` — reutiliza el `.next` existente (iteración rápida del empaquetado).
+- `-Zip` — genera además `dist/fb-publisher-portable.zip` para enviárselo al usuario.
+
+Notas:
+
+- El `node.exe` embebido se descarga con la **misma versión exacta** que el Node local, porque el binario nativo de `better-sqlite3` está compilado contra ese ABI. Si cambias de versión de Node, vuelve a ejecutar `npm install` antes de empaquetar.
+- El launcher fija `FB_PUBLISHER_DATA_DIR`, `PLAYWRIGHT_BROWSERS_PATH` y `FB_PUBLISHER_CLI`, de modo que todo el estado vive en `data/` y el botón "iniciar sesión" del dashboard lanza el CLI compilado en vez de `npm run cli`.
+- El scheduler corre dentro del proceso del servidor: solo publica mientras la ventana del launcher siga abierta.
+- El paquete no incluye `.env.local` ni la carpeta `data/` de desarrollo: el trazador de Next arrastraba `data/` (con la sesión de Facebook del desarrollador) al standalone, y ahora se excluye en `next.config.ts` y se borra en el script.
+- `playwright`, `playwright-core` y `better-sqlite3` se copian completos desde `node_modules`: el trazador solo conserva los archivos que alcanza la entrada ESM, lo que deja `require('playwright')` (el CLI compilado) sin resolver.
+
 ## Estructura del proyecto
 
 ```
